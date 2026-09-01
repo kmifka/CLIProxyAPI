@@ -68,10 +68,10 @@ func (e *CodexAutoExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth
 	if e == nil || e.httpExec == nil || e.wsExec == nil {
 		return cliproxyexecutor.Response{}, fmt.Errorf("codex auto executor: executor is nil")
 	}
-	if cliproxyexecutor.DownstreamWebsocket(ctx) && (codexWebsocketsEnabled(auth) || codexModelIsFast(req.Model)) {
+	if cliproxyexecutor.DownstreamWebsocket(ctx) && (codexWebsocketsEnabled(auth) || codexFastRequested(req.Model, opts.Headers)) {
 		return e.wsExec.Execute(ctx, auth, req, opts)
 	}
-	if codexModelIsFast(req.Model) {
+	if codexFastRequested(req.Model, opts.Headers) {
 		return e.wsExec.Execute(ctx, auth, req, opts)
 	}
 	if cliproxyexecutor.RequiredUpstreamWebsocket(ctx) {
@@ -84,10 +84,10 @@ func (e *CodexAutoExecutor) ExecuteStream(ctx context.Context, auth *cliproxyaut
 	if e == nil || e.httpExec == nil || e.wsExec == nil {
 		return nil, fmt.Errorf("codex auto executor: executor is nil")
 	}
-	if cliproxyexecutor.DownstreamWebsocket(ctx) && (codexWebsocketsEnabled(auth) || codexModelIsFast(req.Model)) {
+	if cliproxyexecutor.DownstreamWebsocket(ctx) && (codexWebsocketsEnabled(auth) || codexFastRequested(req.Model, opts.Headers)) {
 		return e.wsExec.ExecuteStream(ctx, auth, req, opts)
 	}
-	if codexModelIsFast(req.Model) {
+	if codexFastRequested(req.Model, opts.Headers) {
 		return e.wsExec.ExecuteStream(ctx, auth, req, opts)
 	}
 	if cliproxyexecutor.RequiredUpstreamWebsocket(ctx) {
@@ -99,6 +99,10 @@ func (e *CodexAutoExecutor) ExecuteStream(ctx context.Context, auth *cliproxyaut
 func codexModelIsFast(model string) bool {
 	_, fast := parseCodexModel(model)
 	return fast
+}
+
+func codexFastRequested(model string, headers http.Header) bool {
+	return codexModelIsFast(model) || strings.TrimSpace(headers.Get("X-LLM-Proxy-Codex-Fast")) == "1"
 }
 
 func (e *CodexAutoExecutor) Refresh(ctx context.Context, auth *cliproxyauth.Auth) (*cliproxyauth.Auth, error) {
