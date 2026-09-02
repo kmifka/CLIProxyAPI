@@ -338,6 +338,11 @@ func (m *Manager) persist(ctx context.Context, auth *Auth) error {
 	if m.store == nil || auth == nil {
 		return nil
 	}
+	// Passive instances share the auth directory with the maintaining instance
+	// and must not write into it.
+	if PassiveMode() {
+		return nil
+	}
 	if errWeight := ValidateAuthWeight(auth); errWeight != nil {
 		return fmt.Errorf("persist auth: %w", errWeight)
 	}

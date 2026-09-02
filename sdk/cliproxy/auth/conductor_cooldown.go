@@ -545,6 +545,10 @@ func (m *Manager) persistCooldownStates(ctx context.Context) {
 	if m == nil {
 		return
 	}
+	// Cooldown state lives in the auth directory too - see persist().
+	if PassiveMode() {
+		return
+	}
 	m.configCooldownMu.Lock()
 	defer m.configCooldownMu.Unlock()
 	m.persistCooldownStatesLocked(ctx)

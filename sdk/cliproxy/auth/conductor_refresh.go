@@ -39,6 +39,10 @@ const (
 // every few seconds and triggers refresh operations when required.
 // Only one loop is kept alive; starting a new one cancels the previous run.
 func (m *Manager) StartAutoRefresh(parent context.Context, interval time.Duration) {
+	if PassiveMode() {
+		log.Info("auth auto-refresh not started: passive mode")
+		return
+	}
 	if interval <= 0 {
 		interval = refreshCheckInterval
 	}
@@ -433,6 +437,12 @@ func (m *Manager) refreshAuth(ctx context.Context, id string) {
 func (m *Manager) refreshAuthForRequest(ctx context.Context, id, failedAccessToken string) (*Auth, error) {
 	if m == nil {
 		return nil, errors.New("auth manager is nil")
+	}
+	// A passive instance never rotates a credential. Refresh tokens are
+	// single-use: calling the endpoint would retire the token the maintaining
+	// instance still holds, and no local cleanup can undo that.
+	if PassiveMode() {
+		return nil, errPassiveRefresh
 	}
 	if ctx == nil {
 		ctx = context.Background()
