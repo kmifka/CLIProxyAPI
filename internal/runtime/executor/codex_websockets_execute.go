@@ -26,7 +26,7 @@ func (e *CodexWebsocketsExecutor) Execute(ctx context.Context, auth *cliproxyaut
 		return e.CodexExecutor.executeCompact(ctx, auth, req, opts)
 	}
 
-	baseModel, fast := parseCodexRequestModel(req.Model, opts.Headers)
+	baseModel, fast := parseCodexRequestModel(req.Model, opts.Headers, req.Payload)
 	apiKey, baseURL := codexCreds(auth)
 	if baseURL == "" {
 		baseURL = "https://chatgpt.com/backend-api/codex"

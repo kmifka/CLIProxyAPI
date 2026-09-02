@@ -26,7 +26,7 @@ func (e *CodexExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Au
 	if isCodexOpenAIImageRequest(opts) {
 		return e.executeOpenAIImageStream(ctx, auth, req, opts)
 	}
-	baseModel, fast := parseCodexRequestModel(req.Model, opts.Headers)
+	baseModel, fast := parseCodexRequestModel(req.Model, opts.Headers, req.Payload)
 
 	apiKey, baseURL := codexCreds(auth)
 	if baseURL == "" {

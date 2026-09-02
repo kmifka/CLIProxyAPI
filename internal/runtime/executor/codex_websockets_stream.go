@@ -26,7 +26,7 @@ func (e *CodexWebsocketsExecutor) ExecuteStream(ctx context.Context, auth *clipr
 		return nil, statusErr{code: http.StatusBadRequest, msg: "streaming not supported for /responses/compact"}
 	}
 
-	baseModel, fast := parseCodexRequestModel(req.Model, opts.Headers)
+	baseModel, fast := parseCodexRequestModel(req.Model, opts.Headers, req.Payload)
 	apiKey, baseURL := codexCreds(auth)
 	if baseURL == "" {
 		baseURL = "https://chatgpt.com/backend-api/codex"
