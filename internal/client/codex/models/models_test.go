@@ -135,22 +135,10 @@ func TestCodexClientModelsResponse_AppliesDisplayNameToTemplateModel(t *testing.
 		"display_name": "Configured Codex Name",
 	}}, nil, false)
 	models, ok := resp["models"].([]map[string]any)
-	if !ok || len(models) == 0 {
-		t.Fatalf("models = %#v, want at least one model", resp["models"])
+	if !ok || len(models) != 1 {
+		t.Fatalf("models = %#v, want one model", resp["models"])
 	}
-	// This fork appends a "<id>-fast" alias for every template that offers a
-	// priority service tier, so the base entry is no longer alone in the list.
-	// Locate it by slug instead of assuming a count.
-	var base map[string]any
-	for _, model := range models {
-		if stringModelValue(model, "slug") == "gpt-5.5" {
-			base = model
-			break
-		}
-	}
-	if base == nil {
-		t.Fatalf("no entry for gpt-5.5 in %#v", models)
-	}
+	base := models[0]
 	if got := stringModelValue(base, "display_name"); got != "Configured Codex Name" {
 		t.Fatalf("display_name = %q, want Configured Codex Name", got)
 	}
