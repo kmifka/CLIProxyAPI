@@ -92,6 +92,36 @@ type recordingStore struct {
 	saves int
 }
 
+type passiveCooldownStore struct{ saves int }
+
+func (s *passiveCooldownStore) Load(context.Context) ([]CooldownStateRecord, error) {
+	return nil, nil
+}
+
+func (s *passiveCooldownStore) Save(context.Context, []CooldownStateRecord) error {
+	s.saves++
+	return nil
+}
+
+func TestPassiveModeSuppressesDirectCooldownPersistence(t *testing.T) {
+	setPassive(t, "1")
+	m := NewManager(nil, nil, nil)
+	store := &passiveCooldownStore{}
+	// Config reload and store replacement can bypass the outer persistence
+	// helper. They must still never write when running as a passive consumer.
+	if !m.persistCooldownStatesToLocked(context.Background(), store) {
+		t.Fatal("suppressed persistence must be a successful no-op")
+	}
+	if store.saves != 0 {
+		t.Fatal("passive config/store path wrote cooldown state")
+	}
+	setPassive(t, "0")
+	m.persistCooldownStatesToLocked(context.Background(), store)
+	if store.saves != 1 {
+		t.Fatal("active persistence must remain enabled")
+	}
+}
+
 func (s *recordingStore) Save(_ context.Context, auth *Auth) (string, error) {
 	s.saves++
 	return auth.ID, nil

@@ -18,6 +18,7 @@ func TestParseCodexRequestModelRecognisesAllThreeMarkers(t *testing.T) {
 		wantBase string
 		wantFast bool
 	}{
+		{"astra priority", "gpt-6-astra", nil, []byte(`{"model":"gpt-6-astra","service_tier":"priority"}`), "gpt-6-astra", true},
 		{"front proxy header", "gpt-5.5", fastHeader, plainBody, "gpt-5.5", true},
 		{"retired -fast alias is just a model name now", "gpt-5.5-fast", nil, plainBody, "gpt-5.5-fast", false},
 		{"native service_tier", "gpt-5.5", nil, priorityBody, "gpt-5.5", true},
