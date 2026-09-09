@@ -1,0 +1,41 @@
+name: sync-upstream
+on:
+  schedule:
+    - cron: '17 4 * * *'
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: fork-upstream-update
+  cancel-in-progress: false
+jobs:
+  integrate:
+    if: github.repository == 'kmifka/CLIProxyAPI'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Integrate latest upstream release and verify the fork
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="$(gh release view --repo router-for-me/CLIProxyAPI --json tagName --jq .tagName)"
+          [[ "$tag" =~ ^v7\.[0-9]+\.[0-9]+$ ]]
+          git remote add upstream https://github.com/router-for-me/CLIProxyAPI.git
+          git fetch upstream "refs/tags/$tag:refs/tags/$tag"
+          if git merge-base --is-ancestor "$tag" HEAD; then exit 0; fi
+          git config user.name 'llm-proxy update bot'
+          git config user.email 'llm-proxy-update@users.noreply.github.com'
+          git merge --no-commit --no-ff "$tag"
+          go test ./...
+          go build -o /tmp/cliproxy-server ./cmd/server
+          git commit -m "Merge upstream $tag after fork regression tests"
+          # Non-fast-forward rejection also protects against simultaneous edits.
+          git push origin HEAD:main
