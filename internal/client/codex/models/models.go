@@ -85,9 +85,6 @@ func buildCodexClientModels(models []map[string]any, providersForModel Providers
 				entry["multi_agent_version"] = "v2"
 			}
 			result = append(result, entry)
-			if codexTemplateHasPriorityTier(template) {
-				result = append(result, buildFastCatalogAlias(entry, id))
-			}
 			continue
 		}
 
@@ -107,29 +104,6 @@ func buildCodexClientModels(models []map[string]any, providersForModel Providers
 	})
 
 	return result
-}
-
-func codexTemplateHasPriorityTier(model map[string]any) bool {
-	tiers, ok := model["service_tiers"].([]any)
-	if !ok {
-		return false
-	}
-	for _, raw := range tiers {
-		if tier, ok := raw.(map[string]any); ok && strings.EqualFold(stringModelValue(tier, "id"), "priority") {
-			return true
-		}
-	}
-	return false
-}
-
-func buildFastCatalogAlias(entry map[string]any, baseID string) map[string]any {
-	fast := cloneCodexClientModelMap(entry)
-	fastID := baseID + "-fast"
-	fast["slug"] = fastID
-	fast["display_name"] = stringModelValue(entry, "display_name") + " Fast"
-	fast["description"] = stringModelValue(entry, "description") + " (Fast)"
-	fast["service_tiers"] = []any{}
-	return fast
 }
 
 func maxCodexClientTemplatePriority(templates map[string]map[string]any) int {

@@ -18,8 +18,8 @@ func TestParseCodexRequestModelRecognisesAllThreeMarkers(t *testing.T) {
 		wantBase string
 		wantFast bool
 	}{
-		{"catalog alias", "gpt-5.5-fast", nil, plainBody, "gpt-5.5", true},
 		{"front proxy header", "gpt-5.5", fastHeader, plainBody, "gpt-5.5", true},
+		{"retired -fast alias is just a model name now", "gpt-5.5-fast", nil, plainBody, "gpt-5.5-fast", false},
 		{"native service_tier", "gpt-5.5", nil, priorityBody, "gpt-5.5", true},
 		{"native, mixed case", "gpt-5.5", nil, []byte(`{"service_tier":"Priority"}`), "gpt-5.5", true},
 		{"plain request", "gpt-5.5", nil, plainBody, "gpt-5.5", false},
@@ -47,7 +47,6 @@ func TestCodexFastRequestedAgreesWithParse(t *testing.T) {
 		headers http.Header
 		payload []byte
 	}{
-		{"gpt-5.5-fast", nil, nil},
 		{"gpt-5.5", http.Header{"X-Llm-Proxy-Codex-Fast": []string{"1"}}, nil},
 		{"gpt-5.5", nil, []byte(`{"service_tier":"priority"}`)},
 		{"gpt-5.5", nil, []byte(`{"service_tier":"default"}`)},
@@ -55,7 +54,7 @@ func TestCodexFastRequestedAgreesWithParse(t *testing.T) {
 	}
 	for _, c := range cases {
 		_, fast := parseCodexRequestModel(c.model, c.headers, c.payload)
-		routed := codexFastRequested(c.model, headerOrEmpty(c.headers), c.payload)
+		routed := codexFastRequested(headerOrEmpty(c.headers), c.payload)
 		if fast != routed {
 			t.Errorf("model=%q payload=%s: parse says %v, routing says %v", c.model, c.payload, fast, routed)
 		}

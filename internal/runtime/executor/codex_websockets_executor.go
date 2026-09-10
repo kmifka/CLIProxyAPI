@@ -68,10 +68,10 @@ func (e *CodexAutoExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth
 	if e == nil || e.httpExec == nil || e.wsExec == nil {
 		return cliproxyexecutor.Response{}, fmt.Errorf("codex auto executor: executor is nil")
 	}
-	if cliproxyexecutor.DownstreamWebsocket(ctx) && (codexWebsocketsEnabled(auth) || codexFastRequested(req.Model, opts.Headers, req.Payload)) {
+	if cliproxyexecutor.DownstreamWebsocket(ctx) && (codexWebsocketsEnabled(auth) || codexFastRequested(opts.Headers, req.Payload)) {
 		return e.wsExec.Execute(ctx, auth, req, opts)
 	}
-	if codexFastRequested(req.Model, opts.Headers, req.Payload) {
+	if codexFastRequested(opts.Headers, req.Payload) {
 		return e.wsExec.Execute(ctx, auth, req, opts)
 	}
 	if cliproxyexecutor.RequiredUpstreamWebsocket(ctx) {
@@ -84,10 +84,10 @@ func (e *CodexAutoExecutor) ExecuteStream(ctx context.Context, auth *cliproxyaut
 	if e == nil || e.httpExec == nil || e.wsExec == nil {
 		return nil, fmt.Errorf("codex auto executor: executor is nil")
 	}
-	if cliproxyexecutor.DownstreamWebsocket(ctx) && (codexWebsocketsEnabled(auth) || codexFastRequested(req.Model, opts.Headers, req.Payload)) {
+	if cliproxyexecutor.DownstreamWebsocket(ctx) && (codexWebsocketsEnabled(auth) || codexFastRequested(opts.Headers, req.Payload)) {
 		return e.wsExec.ExecuteStream(ctx, auth, req, opts)
 	}
-	if codexFastRequested(req.Model, opts.Headers, req.Payload) {
+	if codexFastRequested(opts.Headers, req.Payload) {
 		return e.wsExec.ExecuteStream(ctx, auth, req, opts)
 	}
 	if cliproxyexecutor.RequiredUpstreamWebsocket(ctx) {
@@ -96,14 +96,8 @@ func (e *CodexAutoExecutor) ExecuteStream(ctx context.Context, auth *cliproxyaut
 	return e.httpExec.ExecuteStream(ctx, auth, req, opts)
 }
 
-func codexModelIsFast(model string) bool {
-	_, fast := parseCodexModel(model)
-	return fast
-}
-
-func codexFastRequested(model string, headers http.Header, payload []byte) bool {
-	return codexModelIsFast(model) ||
-		strings.TrimSpace(headers.Get("X-LLM-Proxy-Codex-Fast")) == "1" ||
+func codexFastRequested(headers http.Header, payload []byte) bool {
+	return strings.TrimSpace(headers.Get("X-LLM-Proxy-Codex-Fast")) == "1" ||
 		codexPayloadRequestsPriority(payload)
 }
 
