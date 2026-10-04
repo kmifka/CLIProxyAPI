@@ -582,6 +582,12 @@ func (m *Manager) refreshAuthForRequestAtEpoch(ctx context.Context, id, failedAc
 	if m == nil {
 		return nil, errors.New("auth manager is nil")
 	}
+	// A passive candidate shares credentials read-only with its active owner.
+	// Refusing before executor refresh prevents a single-use refresh token from
+	// being consumed even when a filesystem mount would reject the later write.
+	if PassiveMode() {
+		return nil, errPassiveRefresh
+	}
 	forceRefresh := isForceRefreshContext(ctx)
 	ctx = cliproxyexecutor.WithoutRequestProxyURL(ctx)
 	if ctx == nil {
