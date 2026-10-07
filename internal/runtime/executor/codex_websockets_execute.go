@@ -87,9 +87,6 @@ func (e *CodexWebsocketsExecutor) Execute(ctx context.Context, auth *cliproxyaut
 	wsHeaders = applyCodexWebsocketHeaders(ctx, wsHeaders, auth, apiKey, e.cfg, nativeRequest, opts.Headers)
 	applyCodexRoutingHint(ctx, wsHeaders, auth, baseModel, body, opts.Headers)
 	applyModelHeaderOverrides(wsHeaders, baseModel)
-	// Session reuse does not retain the original handshake hint; fail closed
-	// rather than treating newly prepared (but unsent) headers as route evidence.
-	priorityRoute := executionSessionIDFromOptions(opts) == "" && helps.CodexPriorityRouteSelected(auth, wsHeaders, body)
 
 	var authID, authLabel, authType, authValue string
 	if auth != nil {
@@ -307,7 +304,6 @@ func (e *CodexWebsocketsExecutor) Execute(ctx context.Context, auth *cliproxyaut
 		helps.AppendCodexAPIWebsocketResponse(ctx, e.cfg, payload)
 		helps.EmitWebSocketResponseEvent(ctx, opts, auth, e.Identifier(), req.Model, payload)
 		payload = helps.RestoreCodexMultiAgentV2Response(payload, restoreMultiAgentV2)
-		payload = helps.ReportCodexPriorityRoute(payload, priorityRoute)
 
 		if wsErr, ok := parseCodexWebsocketErrorWithCooling(payload, e.modelLevelCooling()); ok {
 			if sess != nil {
