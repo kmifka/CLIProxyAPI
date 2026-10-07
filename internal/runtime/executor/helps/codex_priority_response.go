@@ -40,7 +40,7 @@ func ReportCodexPriorityRoute(event []byte, selected bool) []byte {
 		return event
 	}
 	tier := root.Get("response.service_tier")
-	if tier.Exists() && (tier.Type != gjson.String || (tier.String() != "default" && tier.String() != "auto" && tier.String() != "")) {
+	if tier.Exists() && (tier.Type != gjson.String || (tier.String() != "default" && tier.String() != "")) {
 		return event
 	}
 	out, err := sjson.SetBytes(event, "response.service_tier", "priority")
