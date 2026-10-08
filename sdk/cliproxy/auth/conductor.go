@@ -89,6 +89,11 @@ type PluginSchedulerAcrossPriorities interface {
 	SchedulerWantsAcrossPriorities() bool
 }
 
+// PluginSchedulerPreference opts into membership-only evaluation before affinity reuse.
+type PluginSchedulerPreference interface {
+	SchedulerWantsPreference() bool
+}
+
 type pluginSchedulerState interface {
 	HasScheduler() bool
 }

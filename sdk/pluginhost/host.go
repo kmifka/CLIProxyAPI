@@ -192,6 +192,11 @@ func (h *Host) PickAuth(ctx context.Context, req pluginapi.SchedulerPickRequest)
 	return h.inner.PickAuth(ctx, req)
 }
 
+// SchedulerWantsPreference reports membership-only preselection opt-in.
+func (h *Host) SchedulerWantsPreference() bool {
+	return h != nil && h.inner != nil && h.inner.SchedulerWantsPreference()
+}
+
 // HasScheduler reports whether any active plugin provides a scheduler.
 func (h *Host) HasScheduler() bool {
 	return h != nil && h.inner != nil && h.inner.HasScheduler()

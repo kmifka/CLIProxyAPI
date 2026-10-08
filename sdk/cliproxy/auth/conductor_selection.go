@@ -459,10 +459,6 @@ func (m *Manager) LookupSessionAffinity(provider, model, sessionID string) (*Aut
 		return nil, "unsupported"
 	}
 	m.mu.RLock()
-	if m.pluginScheduler != nil {
-		m.mu.RUnlock()
-		return nil, "unsupported"
-	}
 	sel := m.selector
 	authProviderMap := make(map[string]string, len(m.auths))
 	for id, a := range m.auths {
@@ -991,6 +987,118 @@ func (m *Manager) pickViaPluginScheduler(ctx context.Context, scheduler PluginSc
 		return nil, false, nil
 	}
 	return m.pickViaBuiltinScheduler(ctx, strategy, providerKey, providers, model, opts, tried)
+}
+
+// requestSelector is a request-local adapter; it never replaces the configured selector.
+type requestSelector func(context.Context, string, string, cliproxyexecutor.Options, []*Auth) (*Auth, error)
+
+func (f requestSelector) Pick(ctx context.Context, provider, model string, opts cliproxyexecutor.Options, auths []*Auth) (*Auth, error) {
+	return f(ctx, provider, model, opts, auths)
+}
+
+// currentSelectionCandidates rechecks snapshots after a plugin callback, which may
+// overlap credential updates or registry changes. The candidate IDs remain bounded
+// by the original request's eligibility and priority scope.
+func (m *Manager) currentSelectionCandidates(ctx context.Context, provider, model string, opts cliproxyexecutor.Options, tried map[string]struct{}, snapshots []*Auth) []*Auth {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	eligibility := authSelectionEligibilityForRequest(ctx, opts)
+	pinned := pinnedAuthIDFromMetadata(opts.Metadata)
+	out := make([]*Auth, 0, len(snapshots))
+	for _, snapshot := range snapshots {
+		current := m.auths[snapshot.ID]
+		if current == nil || current.Disabled || !eligibility.allows(current) {
+			continue
+		}
+		if pinned != "" && current.ID != pinned {
+			continue
+		}
+		if executorKeyFromAuth(current) != executorKeyFromAuth(snapshot) {
+			continue
+		}
+		if _, used := tried[current.ID]; used {
+			continue
+		}
+		if !m.authSupportsRouteModel(registry.GetGlobalRegistry(), current, model) {
+			continue
+		}
+		if blocked, _, _ := isAuthBlockedForModel(current, m.selectionModelForAuth(current, model), time.Now()); blocked {
+			continue
+		}
+		out = append(out, current.Clone())
+	}
+	return out
+}
+
+// pickWithPluginScheduler lets native affinity own lookup, failover, and binding.
+// Plugins are consulted only when the affinity selector needs its fallback.
+func (m *Manager) pickWithPluginScheduler(ctx context.Context, selector Selector, scheduler PluginScheduler, provider string, providers []string, model string, opts cliproxyexecutor.Options, tried map[string]struct{}, available, selectorAuths []*Auth) (*Auth, error) {
+	if scheduler == nil {
+		return selector.Pick(selectorContextForAvailableAuths(ctx, selector, model), provider, selectionArgForSelector(selector, model), opts, selectorAuths)
+	}
+	// Membership is evaluated before native lookup. Only a bounded subset of SDK-ready
+	// candidates is accepted; no credential state or other session is modified.
+	if opt, ok := scheduler.(PluginSchedulerPreference); ok && opt.SchedulerWantsPreference() {
+		req := pluginapi.SchedulerPickRequest{PreferenceOnly: true, Provider: provider, Providers: schedulerProviders(provider, providers), Model: model, Stream: opts.Stream, Options: schedulerOptions(opts), Candidates: schedulerAuthCandidates(available)}
+		if provider == "mixed" {
+			req.Provider = ""
+		}
+		resp, handled, err := scheduler.PickAuth(ctx, req)
+		if err != nil {
+			return nil, err
+		}
+		if handled && resp.Handled && len(resp.EligibleAuthIDs) > 0 {
+			ids := make(map[string]bool, len(resp.EligibleAuthIDs))
+			valid := true
+			for _, id := range resp.EligibleAuthIDs {
+				if pickSchedulerAuthByID(available, id) == nil {
+					valid = false
+					break
+				}
+				ids[id] = true
+			}
+			if valid {
+				narrow := func(auths []*Auth) []*Auth {
+					out := make([]*Auth, 0, len(auths))
+					for _, a := range auths {
+						if ids[a.ID] {
+							out = append(out, a)
+						}
+					}
+					return out
+				}
+				available = m.currentSelectionCandidates(ctx, provider, model, opts, tried, narrow(available))
+				selectorAuths = m.currentSelectionCandidates(ctx, provider, model, opts, tried, narrow(selectorAuths))
+			}
+		}
+	}
+	fallback := selector
+	affinity, hasAffinity := selector.(*SessionAffinitySelector)
+	if hasAffinity {
+		fallback = affinity.fallback
+	}
+	policy := requestSelector(func(pickCtx context.Context, _ string, _ string, pickOpts cliproxyexecutor.Options, fallbackAuths []*Auth) (*Auth, error) {
+		selected, handled, err := m.pickViaPluginScheduler(pickCtx, scheduler, provider, providers, model, pickOpts, tried, available)
+		if err != nil {
+			return nil, err
+		}
+		if handled && selected != nil && pickSchedulerAuthByID(available, selected.ID) != nil {
+			current := m.currentSelectionCandidates(ctx, provider, model, pickOpts, tried, []*Auth{selected})
+			if len(current) != 0 {
+				return current[0], nil
+			}
+		}
+		current := m.currentSelectionCandidates(ctx, provider, model, pickOpts, tried, selectorAuths)
+		if _, weighted := fallback.(*WeightedRoundRobinSelector); weighted {
+			current = positiveWeightAuths(current)
+		}
+		return fallback.Pick(pickCtx, provider, selectionArgForSelector(selector, model), pickOpts, highestPriorityAuths(current))
+	})
+	selectorCtx := selectorContextForAvailableAuths(ctx, selector, model)
+	if hasAffinity {
+		return affinity.pickWithFallback(selectorCtx, provider, selectionArgForSelector(selector, model), opts, selectorAuths, policy)
+	}
+	return policy.Pick(selectorCtx, provider, model, opts, selectorAuths)
 }
 
 func (m *Manager) authSupportsRouteModel(registryRef *registry.ModelRegistry, auth *Auth, routeModel string) bool {
@@ -1781,21 +1889,13 @@ func (m *Manager) pickNextLegacy(ctx context.Context, provider, model string, op
 	}
 	m.mu.RUnlock()
 
-	selected, handled, errPick := m.pickViaPluginScheduler(ctx, pluginScheduler, provider, []string{provider}, model, opts, tried, available)
+	selected, errPick := m.pickWithPluginScheduler(ctx, selector, pluginScheduler, provider, []string{provider}, model, opts, tried, available, selectorAuths)
 	if errPick != nil {
+		if isBuiltInSelector(selector) {
+			errPick = restoreModelCooldownErrorModel(errPick, model)
+		}
 		m.warnLogAuthUnavailable(ctx, []string{provider}, model, opts, tried, errPick)
 		return nil, nil, errPick
-	}
-	if !handled {
-		selectorCtx := selectorContextForAvailableAuths(ctx, selector, model)
-		selected, errPick = selector.Pick(selectorCtx, provider, selectionArgForSelector(selector, model), opts, selectorAuths)
-		if errPick != nil {
-			if isBuiltInSelector(selector) {
-				errPick = restoreModelCooldownErrorModel(errPick, model)
-			}
-			m.warnLogAuthUnavailable(ctx, []string{provider}, model, opts, tried, errPick)
-			return nil, nil, errPick
-		}
 	}
 	if selected == nil {
 		return nil, nil, &Error{Code: "auth_not_found", Message: "selector returned no auth"}
@@ -2115,21 +2215,13 @@ func (m *Manager) pickNextMixedLegacy(ctx context.Context, providers []string, m
 	}
 	m.mu.RUnlock()
 
-	selected, handled, errPick := m.pickViaPluginScheduler(ctx, pluginScheduler, "mixed", providers, model, opts, tried, available)
+	selected, errPick := m.pickWithPluginScheduler(ctx, selector, pluginScheduler, "mixed", providers, model, opts, tried, available, selectorAuths)
 	if errPick != nil {
+		if isBuiltInSelector(selector) {
+			errPick = restoreModelCooldownErrorModel(errPick, model)
+		}
 		m.warnLogAuthUnavailable(ctx, providers, model, opts, tried, errPick)
 		return nil, nil, "", errPick
-	}
-	if !handled {
-		selectorCtx := selectorContextForAvailableAuths(ctx, selector, model)
-		selected, errPick = selector.Pick(selectorCtx, "mixed", selectionArgForSelector(selector, model), opts, selectorAuths)
-		if errPick != nil {
-			if isBuiltInSelector(selector) {
-				errPick = restoreModelCooldownErrorModel(errPick, model)
-			}
-			m.warnLogAuthUnavailable(ctx, providers, model, opts, tried, errPick)
-			return nil, nil, "", errPick
-		}
 	}
 	if selected == nil {
 		return nil, nil, "", &Error{Code: "auth_not_found", Message: "selector returned no auth"}

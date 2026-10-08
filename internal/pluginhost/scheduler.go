@@ -30,6 +30,11 @@ func (h *Host) PickAuth(ctx context.Context, req pluginapi.SchedulerPickRequest)
 	return resp, true, nil
 }
 
+func (h *Host) SchedulerWantsPreference() bool {
+	r := h.schedulerRecord()
+	return r != nil && r.plugin.Capabilities.SchedulerPreference
+}
+
 func (h *Host) HasScheduler() bool {
 	return h.schedulerRecord() != nil
 }
@@ -80,6 +85,17 @@ func (h *Host) callScheduler(ctx context.Context, record capabilityRecord, req p
 }
 
 func normalizeSchedulerResponse(resp pluginapi.SchedulerPickResponse, req pluginapi.SchedulerPickRequest) (pluginapi.SchedulerPickResponse, bool, string) {
+	if req.PreferenceOnly {
+		if len(resp.EligibleAuthIDs) == 0 {
+			return pluginapi.SchedulerPickResponse{}, false, "empty preference"
+		}
+		for _, id := range resp.EligibleAuthIDs {
+			if !schedulerCandidateExists(req.Candidates, id) {
+				return pluginapi.SchedulerPickResponse{}, false, "unknown preference id"
+			}
+		}
+		return resp, true, ""
+	}
 	resp.AuthID = strings.TrimSpace(resp.AuthID)
 	resp.DelegateBuiltin = strings.TrimSpace(resp.DelegateBuiltin)
 	resp.RejectCode = strings.TrimSpace(resp.RejectCode)

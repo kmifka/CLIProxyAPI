@@ -415,9 +415,10 @@ func TestHostAffinityLookupCallback_Contract(t *testing.T) {
 		}
 	})
 
-	t.Run("unsupported when plugin scheduler active", func(t *testing.T) {
+	t.Run("native lookup when plugin scheduler active", func(t *testing.T) {
 		managerWithPluginSched := coreauth.NewManager(nil, nil, nil)
 		managerWithPluginSched.SetSelector(selector)
+		managerWithPluginSched.Register(context.Background(), authA)
 		managerWithPluginSched.SetPluginScheduler(&mockPluginScheduler{})
 		hostWithPluginSched := New()
 		hostWithPluginSched.SetAuthManager(managerWithPluginSched)
@@ -429,8 +430,8 @@ func TestHostAffinityLookupCallback_Contract(t *testing.T) {
 		})
 		rawResp, _ := hostWithPluginSched.callFromPlugin(context.Background(), pluginabi.MethodHostAffinityLookup, reqPayload)
 		resp, _ := decodeRPCEnvelope[pluginapi.HostAffinityLookupResponse](rawResp)
-		if resp.Status != pluginapi.HostAffinityStatusUnsupported {
-			t.Fatalf("status with plugin scheduler = %q, want %q", resp.Status, pluginapi.HostAffinityStatusUnsupported)
+		if resp.Status != pluginapi.HostAffinityStatusBound || resp.AuthIndex != authA.Index {
+			t.Fatalf("native lookup with plugin scheduler = %#v", resp)
 		}
 	})
 
