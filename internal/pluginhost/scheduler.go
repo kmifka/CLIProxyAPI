@@ -85,7 +85,7 @@ func (h *Host) callScheduler(ctx context.Context, record capabilityRecord, req p
 }
 
 func normalizeSchedulerResponse(resp pluginapi.SchedulerPickResponse, req pluginapi.SchedulerPickRequest) (pluginapi.SchedulerPickResponse, bool, string) {
-	if req.PreferenceOnly {
+	if req.PreferenceOnly && !resp.Reject {
 		if len(resp.EligibleAuthIDs) == 0 {
 			return pluginapi.SchedulerPickResponse{}, false, "empty preference"
 		}

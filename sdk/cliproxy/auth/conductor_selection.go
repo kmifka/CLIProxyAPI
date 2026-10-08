@@ -72,6 +72,26 @@ func isBuiltInSelector(selector Selector) bool {
 	}
 }
 
+type requiredSchedulerPreferenceKey struct{}
+
+// WithRequiredSchedulerPreference makes plugin membership authoritative for this
+// request. Embedders opt in at their entitlement boundary; ordinary SDK traffic
+// retains native fallback. No provider or tier policy is embedded in the SDK.
+func WithRequiredSchedulerPreference(ctx context.Context) context.Context {
+	return context.WithValue(ctx, requiredSchedulerPreferenceKey{}, true)
+}
+
+// RequiredSchedulerPreference reports the embedder's request boundary contract.
+func RequiredSchedulerPreference(ctx context.Context) bool { return requiresSchedulerPreference(ctx) }
+
+func requiresSchedulerPreference(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	required, _ := ctx.Value(requiredSchedulerPreferenceKey{}).(bool)
+	return required
+}
+
 type requiredAuthKindContextKey struct{}
 type credentialPolicyContextKey struct{}
 
@@ -852,12 +872,17 @@ func schedulerAuthCandidates(auths []*Auth) []pluginapi.SchedulerAuthCandidate {
 		if auth == nil {
 			continue
 		}
+		attributes := schedulerSafeAttributes(auth.Attributes)
+		if attributes == nil {
+			attributes = map[string]string{}
+		}
+		attributes[AttributeAuthKind] = auth.AuthKind()
 		out = append(out, pluginapi.SchedulerAuthCandidate{
 			ID:         auth.ID,
 			Provider:   strings.ToLower(strings.TrimSpace(auth.Provider)),
 			Priority:   authPriority(auth),
 			Status:     string(auth.Status),
-			Attributes: schedulerSafeAttributes(auth.Attributes),
+			Attributes: attributes,
 		})
 	}
 	return out
@@ -1033,6 +1058,14 @@ func (m *Manager) currentSelectionCandidates(ctx context.Context, provider, mode
 // pickWithPluginScheduler lets native affinity own lookup, failover, and binding.
 // Plugins are consulted only when the affinity selector needs its fallback.
 func (m *Manager) pickWithPluginScheduler(ctx context.Context, selector Selector, scheduler PluginScheduler, provider string, providers []string, model string, opts cliproxyexecutor.Options, tried map[string]struct{}, available, selectorAuths []*Auth) (*Auth, error) {
+	required := requiresSchedulerPreference(ctx)
+	unavailable := func() (*Auth, error) {
+		return nil, &Error{Code: "scheduler_preference_unavailable", Message: "required scheduler membership unavailable", HTTPStatus: http.StatusServiceUnavailable}
+	}
+	preference, hasPreference := scheduler.(PluginSchedulerPreference)
+	if required && (scheduler == nil || !hasPreference || !preference.SchedulerWantsPreference()) {
+		return unavailable()
+	}
 	if scheduler == nil {
 		return selector.Pick(selectorContextForAvailableAuths(ctx, selector, model), provider, selectionArgForSelector(selector, model), opts, selectorAuths)
 	}
@@ -1046,6 +1079,27 @@ func (m *Manager) pickWithPluginScheduler(ctx context.Context, selector Selector
 		resp, handled, err := scheduler.PickAuth(ctx, req)
 		if err != nil {
 			return nil, err
+		}
+		if handled && resp.Handled && resp.Reject {
+			code := strings.TrimSpace(resp.RejectCode)
+			if code == "" {
+				code = "auth_unavailable"
+			}
+			reason := strings.TrimSpace(resp.RejectReason)
+			if reason == "" {
+				reason = "scheduler rejected candidate selection"
+			}
+			return nil, &Error{Code: code, Message: reason, HTTPStatus: http.StatusServiceUnavailable}
+		}
+		if required {
+			if !handled || !resp.Handled || len(resp.EligibleAuthIDs) == 0 {
+				return unavailable()
+			}
+			for _, id := range resp.EligibleAuthIDs {
+				if pickSchedulerAuthByID(available, id) == nil {
+					return unavailable()
+				}
+			}
 		}
 		if handled && resp.Handled && len(resp.EligibleAuthIDs) > 0 {
 			ids := make(map[string]bool, len(resp.EligibleAuthIDs))
@@ -2086,7 +2140,7 @@ func (m *Manager) pickNext(ctx context.Context, provider, model string, opts cli
 	opts.Metadata[cliproxyexecutor.SessionAffinityProviderMetadataKey] = provider
 	opts.Metadata[cliproxyexecutor.SessionAffinityModelMetadataKey] = model
 
-	if m.hasPluginScheduler() || !m.useSchedulerFastPath() {
+	if requiresSchedulerPreference(ctx) || m.hasPluginScheduler() || !m.useSchedulerFastPath() {
 		return m.pickNextLegacy(ctx, provider, model, opts, tried)
 	}
 	eligibility := authSelectionEligibilityForRequest(ctx, opts)
@@ -2251,7 +2305,7 @@ func (m *Manager) pickNextMixed(ctx context.Context, providers []string, model s
 	opts.Metadata[cliproxyexecutor.SessionAffinityProviderMetadataKey] = "mixed"
 	opts.Metadata[cliproxyexecutor.SessionAffinityModelMetadataKey] = model
 
-	if m.hasPluginScheduler() || !m.useSchedulerFastPath() {
+	if requiresSchedulerPreference(ctx) || m.hasPluginScheduler() || !m.useSchedulerFastPath() {
 		return m.pickNextMixedLegacy(ctx, providers, model, opts, tried)
 	}
 

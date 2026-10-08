@@ -531,6 +531,8 @@ type SchedulerAuthCandidate struct {
 // SchedulerPickResponse returns a scheduler plugin routing decision.
 type SchedulerPickResponse struct {
 	// EligibleAuthIDs is a non-empty request-local subset for PreferenceOnly.
+	// A handled Reject terminates selection before native affinity, including when
+	// no eligible subset exists; an empty subset alone remains a no-op.
 	EligibleAuthIDs []string
 	// AuthID identifies the selected auth record.
 	AuthID string

@@ -361,13 +361,14 @@ func setGenerateMetadata(meta map[string]any, rawJSON []byte) {
 // It holds a pool of clients to interact with the backend service and manages
 // load balancing, client selection, and configuration.
 type BaseAPIHandler struct {
+	// runtimeMu protects pointer publication only; never held across client calls.
+	runtimeMu sync.RWMutex
 	// AuthManager manages auth lifecycle and execution in the new architecture.
 	AuthManager *coreauth.Manager
 
 	// Cfg holds the current application configuration.
 	// Runtime reads must use CurrentConfig; direct access is construction-only.
-	Cfg       *config.SDKConfig
-	runtimeMu sync.RWMutex
+	Cfg *config.SDKConfig
 
 	// PluginHost optionally applies plugin interceptors around upstream execution.
 	PluginHost PluginInterceptorHost
@@ -517,6 +518,9 @@ func (h *BaseAPIHandler) GetContextWithCancel(handler interfaces.APIHandler, c *
 			parentCtx = logging.WithRequestID(parentCtx, requestID)
 		}
 	}
+	if coreauth.RequiredSchedulerPreference(requestCtx) {
+		parentCtx = coreauth.WithRequiredSchedulerPreference(parentCtx)
+	}
 	newCtx, cancel := context.WithCancel(parentCtx)
 
 	endpoint := ""
@@ -567,7 +571,7 @@ func (h *BaseAPIHandler) GetContextWithCancel(handler interfaces.APIHandler, c *
 		if c != nil {
 			logging.SetResponseStatus(cancelCtx, c.Writer.Status())
 		}
-		if h.CurrentConfig().RequestLog && len(params) == 1 {
+		if cfg := h.CurrentConfig(); cfg != nil && cfg.RequestLog && len(params) == 1 {
 			if captured, exists := c.Get(logging.APIResponseCapturedContextKey); exists {
 				if capturedBool, ok := captured.(bool); ok && capturedBool {
 					cancel()

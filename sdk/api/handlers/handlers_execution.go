@@ -398,12 +398,10 @@ func (h *BaseAPIHandler) pluginExecutorHost() PluginExecutorHost {
 	if h == nil {
 		return nil
 	}
-	h.runtimeMu.RLock()
-	defer h.runtimeMu.RUnlock()
-	if executorHost, ok := h.ModelRouterHost.(PluginExecutorHost); ok && executorHost != nil {
+	if executorHost, ok := h.modelRouterHost().(PluginExecutorHost); ok && executorHost != nil {
 		return executorHost
 	}
-	if executorHost, ok := h.PluginHost.(PluginExecutorHost); ok && executorHost != nil {
+	if executorHost, ok := h.interceptorHost().(PluginExecutorHost); ok && executorHost != nil {
 		return executorHost
 	}
 	return nil
