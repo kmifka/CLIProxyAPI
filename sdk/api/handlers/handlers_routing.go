@@ -267,8 +267,11 @@ func (h *BaseAPIHandler) modelRouterHost() PluginModelRouterHost {
 	if h == nil {
 		return nil
 	}
-	if !isNilPluginModelRouterHost(h.ModelRouterHost) {
-		return h.ModelRouterHost
+	h.runtimeMu.RLock()
+	routerHost := h.ModelRouterHost
+	h.runtimeMu.RUnlock()
+	if !isNilPluginModelRouterHost(routerHost) {
+		return routerHost
 	}
 	host := h.interceptorHost()
 	if host == nil {

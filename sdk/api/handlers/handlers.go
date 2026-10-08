@@ -365,7 +365,9 @@ type BaseAPIHandler struct {
 	AuthManager *coreauth.Manager
 
 	// Cfg holds the current application configuration.
-	Cfg *config.SDKConfig
+	// Runtime reads must use CurrentConfig; direct access is construction-only.
+	Cfg       *config.SDKConfig
+	runtimeMu sync.RWMutex
 
 	// PluginHost optionally applies plugin interceptors around upstream execution.
 	PluginHost PluginInterceptorHost
@@ -397,13 +399,30 @@ func NewBaseAPIHandlers(cfg *config.SDKConfig, authManager *coreauth.Manager) *B
 // Parameters:
 //   - clients: The new slice of AI service clients
 //   - cfg: The new application configuration
-func (h *BaseAPIHandler) UpdateClients(cfg *config.SDKConfig) { h.Cfg = cfg }
+func (h *BaseAPIHandler) UpdateClients(cfg *config.SDKConfig) {
+	h.runtimeMu.Lock()
+	defer h.runtimeMu.Unlock()
+	h.Cfg = cfg
+}
+
+// CurrentConfig returns a synchronized immutable runtime configuration snapshot.
+// Cfg remains available for construction-time compatibility, not live mutation.
+func (h *BaseAPIHandler) CurrentConfig() *config.SDKConfig {
+	if h == nil {
+		return nil
+	}
+	h.runtimeMu.RLock()
+	defer h.runtimeMu.RUnlock()
+	return h.Cfg
+}
 
 // SetPluginHost configures the optional plugin interceptor host.
 func (h *BaseAPIHandler) SetPluginHost(host PluginInterceptorHost) {
 	if h == nil {
 		return
 	}
+	h.runtimeMu.Lock()
+	defer h.runtimeMu.Unlock()
 	if isNilPluginInterceptorHost(host) {
 		h.PluginHost = nil
 		return
@@ -416,6 +435,8 @@ func (h *BaseAPIHandler) SetModelRouterHost(host PluginModelRouterHost) {
 	if h == nil {
 		return
 	}
+	h.runtimeMu.Lock()
+	defer h.runtimeMu.Unlock()
 	if isNilPluginModelRouterHost(host) {
 		h.ModelRouterHost = nil
 		return
@@ -546,7 +567,7 @@ func (h *BaseAPIHandler) GetContextWithCancel(handler interfaces.APIHandler, c *
 		if c != nil {
 			logging.SetResponseStatus(cancelCtx, c.Writer.Status())
 		}
-		if h.Cfg.RequestLog && len(params) == 1 {
+		if h.CurrentConfig().RequestLog && len(params) == 1 {
 			if captured, exists := c.Get(logging.APIResponseCapturedContextKey); exists {
 				if capturedBool, ok := captured.(bool); ok && capturedBool {
 					cancel()
@@ -598,7 +619,7 @@ func (h *BaseAPIHandler) StartNonStreamingKeepAlive(c *gin.Context, ctx context.
 	if h == nil || c == nil {
 		return func() {}
 	}
-	interval := NonStreamingKeepAliveInterval(h.Cfg)
+	interval := NonStreamingKeepAliveInterval(h.CurrentConfig())
 	if interval <= 0 {
 		return func() {}
 	}

@@ -446,7 +446,7 @@ func responsesSSEStartsNewDataFrame(pending, chunk []byte) bool {
 		!responsesSSEHasField(trimmedPending, []byte("data:")) || !responsesSSEDataLinesValid(trimmedPending) {
 		return false
 	}
-	trimmedChunk := bytes.TrimLeft(chunk, " \t\r\n")
+	trimmedChunk := bytes.TrimLeft(chunk, " 	\r\n")
 	return bytes.HasPrefix(trimmedChunk, []byte("data:"))
 }
 
@@ -479,7 +479,7 @@ func responsesSSENeedsLineBreak(pending, chunk []byte) bool {
 	if chunk[0] == '\n' || chunk[0] == '\r' {
 		return false
 	}
-	trimmed := bytes.TrimLeft(chunk, " \t")
+	trimmed := bytes.TrimLeft(chunk, " 	")
 	if len(trimmed) == 0 {
 		return false
 	}
@@ -534,7 +534,12 @@ func (h *OpenAIResponsesAPIHandler) OpenAIResponsesModels(c *gin.Context) {
 }
 
 func (h *OpenAIResponsesAPIHandler) prepareCodexMultiAgentV2Tools(c *gin.Context, payload []byte) []byte {
-	if h == nil || h.Cfg == nil {
+	var base *handlers.BaseAPIHandler
+	if h != nil {
+		base = h.BaseAPIHandler
+	}
+	cfg := base.CurrentConfig()
+	if h == nil || cfg == nil {
 		return payload
 	}
 
@@ -553,7 +558,7 @@ func (h *OpenAIResponsesAPIHandler) prepareCodexMultiAgentV2Tools(c *gin.Context
 		requestCtx,
 		requestHeaders,
 		payload,
-		h.Cfg.Client.Codex.OptimizeMultiAgentV2,
+		cfg.Client.Codex.OptimizeMultiAgentV2,
 		homeEnabled,
 	)
 	if prepared && c != nil {
@@ -563,7 +568,12 @@ func (h *OpenAIResponsesAPIHandler) prepareCodexMultiAgentV2Tools(c *gin.Context
 }
 
 func (h *OpenAIResponsesAPIHandler) prepareCodexOrphanDelegation(c *gin.Context, payload []byte) []byte {
-	if h == nil || h.Cfg == nil || !h.Cfg.CodexOrphanDelegationCompatibility {
+	var base *handlers.BaseAPIHandler
+	if h != nil {
+		base = h.BaseAPIHandler
+	}
+	cfg := base.CurrentConfig()
+	if h == nil || cfg == nil || !cfg.CodexOrphanDelegationCompatibility {
 		return payload
 	}
 	requestCtx := context.Background()

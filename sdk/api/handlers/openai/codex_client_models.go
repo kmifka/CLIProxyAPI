@@ -3,16 +3,22 @@ package openai
 import (
 	codexmodels "github.com/router-for-me/CLIProxyAPI/v8/internal/client/codex/models"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/registry"
+"github.com/router-for-me/CLIProxyAPI/v8/sdk/api/handlers"
 )
 
 func (h *OpenAIAPIHandler) codexClientModelsResponse(clientVersion ...string) map[string]any {
+	var base *handlers.BaseAPIHandler
+	if h != nil {
+		base = h.BaseAPIHandler
+	}
+	cfg := base.CurrentConfig()
 	version := ""
 	if len(clientVersion) > 0 {
 		version = clientVersion[0]
 	}
-	optimizeMultiAgentV2 := h != nil && h.Cfg != nil && h.Cfg.Client.Codex.OptimizeMultiAgentV2
+	optimizeMultiAgentV2 := h != nil && cfg != nil && cfg.Client.Codex.OptimizeMultiAgentV2
 	var applyPatchCapabilityForModel codexmodels.ApplyPatchCapabilityForModelFunc
-	if h != nil && h.Cfg != nil && h.Cfg.Client.Codex.EnableApplyPatch {
+	if h != nil && cfg != nil && cfg.Client.Codex.EnableApplyPatch {
 		applyPatchCapabilityForModel = h.SupportsApplyPatchModel
 	}
 	modelRegistry := registry.GetGlobalRegistry()
