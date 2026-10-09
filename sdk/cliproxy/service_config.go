@@ -16,6 +16,9 @@ func (s *Service) applyConfigUpdate(newCfg *config.Config) {
 }
 
 func (s *Service) applyWatcherConfigUpdate(newCfg *config.Config) {
+	if s.staticHome != nil {
+		return
+	}
 	s.applyConfigUpdateWithAuthSynthesis(context.Background(), newCfg, false)
 }
 

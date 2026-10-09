@@ -6,6 +6,7 @@ package cliproxy
 import (
 	"context"
 	"fmt"
+	"reflect"
 
 	configaccess "github.com/router-for-me/CLIProxyAPI/v8/internal/access/config_access"
 	"github.com/router-for-me/CLIProxyAPI/v8/internal/api"
@@ -21,6 +22,7 @@ import (
 // It provides a fluent interface for configuring all aspects of the service
 // including authentication, file watching, HTTP server options, and lifecycle hooks.
 type Builder struct {
+	staticHome *staticHomeConfig
 	// cfg holds the application configuration.
 	cfg *config.Config
 
@@ -197,6 +199,14 @@ func (b *Builder) WithResultPolicy(policy coreauth.ResultPolicy) *Builder {
 
 // Build validates inputs, applies defaults, and returns a ready-to-run service.
 func (b *Builder) Build() (*Service, error) {
+	if b.staticHome != nil && b.staticHome.err != nil {
+		return nil, b.staticHome.err
+	}
+	if b.staticHome != nil {
+		guard := *b.staticHome
+		b.staticHome = &guard
+		b.cfg = cloneStaticValue(reflect.ValueOf(guard.pinned)).Interface().(*config.Config)
+	}
 	if b.cfg == nil {
 		return nil, fmt.Errorf("cliproxy: configuration is required")
 	}
@@ -209,6 +219,16 @@ func (b *Builder) Build() (*Service, error) {
 	b.cfg.NormalizePluginsConfig()
 	if errResolvePluginsDir := b.cfg.ResolvePluginsDir(); errResolvePluginsDir != nil && b.cfg.Plugins.Enabled {
 		return nil, fmt.Errorf("cliproxy: %w", errResolvePluginsDir)
+	}
+	if b.staticHome != nil {
+		forceHomeRuntimeConfig(b.cfg)
+		b.staticHome.pinned = cloneStaticValue(reflect.ValueOf(b.cfg)).Interface().(*config.Config)
+		fp, err := staticFingerprint(b.staticHome.pinned)
+		if err != nil {
+			return nil, err
+		}
+		b.staticHome.fingerprint = fp
+		b.serverOptions = append(b.serverOptions, api.WithMiddleware(StaticHomeReadOnlyManagement))
 	}
 
 	tokenProvider := b.tokenProvider
@@ -277,6 +297,7 @@ func (b *Builder) Build() (*Service, error) {
 	}
 
 	service := &Service{
+		staticHome:          b.staticHome,
 		cfg:                 b.cfg,
 		configPath:          b.configPath,
 		tokenProvider:       tokenProvider,

@@ -160,6 +160,11 @@ func (s *Service) applyHomeOverlayWithClient(ctx context.Context, remoteCfg *con
 }
 
 func (s *Service) stageHomeOverlayWithClient(ctx context.Context, remoteCfg *config.Config, client *home.Client) (*homePluginFinalization, error) {
+	if s != nil && remoteCfg != nil {
+		if err := s.checkStaticHomeConfig(remoteCfg); err != nil {
+			return nil, err
+		}
+	}
 	work := &homePluginFinalization{}
 	if s == nil || remoteCfg == nil {
 		return work, nil
@@ -185,6 +190,9 @@ func (s *Service) stageHomeOverlayWithClient(ctx context.Context, remoteCfg *con
 	merged.Home = baseCfg.Home
 	storeAuth := merged.Plugins.StoreAuth
 	forceHomeRuntimeConfig(&merged)
+	if s.staticHome != nil {
+		merged = *mergedStaticHomeConfig(remoteCfg, s.staticHome.pinned)
+	}
 	syncCfg := merged
 	syncCfg.Plugins.StoreAuth = storeAuth
 
@@ -535,6 +543,16 @@ func (s *Service) runHomeSubscriber(homeCtx context.Context, parentCtx context.C
 			client = client.NewLifetime()
 		}
 		client.SetManagedLifetime(true)
+		if s.staticHome != nil {
+			if err := client.SetLifecycleConfig(s.staticHome.pinned.CredentialConcurrency); err != nil {
+				return
+			}
+			if err := applyHomeInFlightPublisherConfig(s.coreManager, s.staticHome.pinned.CredentialInFlight); err != nil {
+				return
+			}
+			applyHomeObservationBarrier(registry, s.staticHome.pinned.CredentialConcurrency.ObservationBarrierRevision)
+			cancelBound.Store(int64(s.staticHome.pinned.CredentialConcurrency.WithDefaults().CPACancelBound))
+		}
 		releaseCtx, releaseCancel := context.WithCancel(context.WithoutCancel(homeCtx))
 		releaseFlusher.SetConfigProvider(client.LimiterConfig)
 		releaseFlusher.SetSender(client.PushConcurrencyRelease)
@@ -549,6 +567,7 @@ func (s *Service) runHomeSubscriber(homeCtx context.Context, parentCtx context.C
 		var readyOnce sync.Once
 		var published atomic.Bool
 		workerDone := make(chan struct{})
+		initialConfig := true
 
 		go func() {
 			defer close(workerDone)
@@ -560,6 +579,18 @@ func (s *Service) runHomeSubscriber(homeCtx context.Context, parentCtx context.C
 			if errParse != nil {
 				log.Warnf("failed to parse home config payload: %v", errParse)
 				return errParse
+			}
+			if s.staticHome != nil {
+				first := initialConfig
+				initialConfig = false
+				if err := s.checkStaticHomeConfig(parsed); err != nil {
+					if first {
+						queue.enqueue(nil)
+					}
+					return nil
+				}
+				queue.enqueue(raw)
+				return nil
 			}
 			if errSetLifecycle := client.SetLifecycleConfig(parsed.CredentialConcurrency); errSetLifecycle != nil {
 				log.Warnf("failed to apply Home lifecycle config: %v", errSetLifecycle)
@@ -683,8 +714,11 @@ func (s *Service) runHomeConfigWorkerWithSupervisor(lifetimeCtx, homeCtx context
 				return
 			}
 			parsed, errParse := config.ParseConfigBytes(raw)
-			if errParse == nil {
+			if errParse == nil && !(raw == nil && s.staticHome != nil) {
 				work, errParse = s.stageHomeOverlayWithClient(lifetimeCtx, parsed, client)
+			}
+			if raw == nil && s.staticHome != nil {
+				work, errParse = s.stageHomeOverlayWithClient(lifetimeCtx, s.staticHome.pinned, client)
 			}
 			if errParse == nil {
 				break

@@ -36,6 +36,9 @@ func (s *Service) Run(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	if err := s.validateInitialStaticHome(ctx); err != nil {
+		return err
+	}
 	ctx, runCancel := context.WithCancel(ctx)
 	s.homeMu.Lock()
 	s.runCancel = runCancel
