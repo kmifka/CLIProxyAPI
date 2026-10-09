@@ -163,6 +163,24 @@ func ObserveMergedStreamUsage(buffer *StreamUsageBuffer, update usage.Detail) {
 // MergeStreamUsageDetail merges existing stream usage with a newer update.
 func MergeStreamUsageDetail(existing, update usage.Detail) usage.Detail {
 	merged := update
+	if merged.InputTokenSemantics == "" {
+		merged.InputTokenSemantics = existing.InputTokenSemantics
+	}
+	if merged.TokenProvenance == "" {
+		merged.TokenProvenance = existing.TokenProvenance
+	}
+	if merged.CacheReadObserved == nil {
+		merged.CacheReadObserved = existing.CacheReadObserved
+	}
+	if merged.CacheCreationObserved == nil {
+		merged.CacheCreationObserved = existing.CacheCreationObserved
+	}
+	if merged.CacheCreation5mObserved == nil {
+		merged.CacheCreation5mObserved = existing.CacheCreation5mObserved
+	}
+	if merged.CacheCreation1hObserved == nil {
+		merged.CacheCreation1hObserved = existing.CacheCreation1hObserved
+	}
 	if merged.InputTokens == 0 && existing.InputTokens > 0 {
 		merged.InputTokens = existing.InputTokens
 	}
@@ -184,12 +202,24 @@ func MergeStreamUsageDetail(existing, update usage.Detail) usage.Detail {
 	if merged.ResponseServiceTier == "" {
 		merged.ResponseServiceTier = existing.ResponseServiceTier
 	}
+	if merged.CacheReadObserved != nil {
+		merged.CacheReadTokens = *merged.CacheReadObserved
+	}
+	if merged.CacheCreationObserved != nil {
+		merged.CacheCreationTokens = *merged.CacheCreationObserved
+	}
+	if merged.InputTokenSemantics == "exclusive" {
+		merged.CachedTokens = merged.CacheReadTokens
+		if merged.CachedTokens == 0 {
+			merged.CachedTokens = merged.CacheCreationTokens
+		}
+	}
 	cached := merged.CacheReadTokens + merged.CacheCreationTokens
 	if cached == 0 {
 		cached = merged.CachedTokens
 	}
 	calculatedTotal := merged.InputTokens + merged.OutputTokens + cached
-	if merged.TotalTokens == 0 || merged.TotalTokens < calculatedTotal {
+	if merged.InputTokenSemantics == "exclusive" || merged.TotalTokens == 0 || merged.TotalTokens < calculatedTotal {
 		merged.TotalTokens = calculatedTotal
 	}
 	nonReasoningOutput := merged.OutputTokens - merged.ReasoningTokens

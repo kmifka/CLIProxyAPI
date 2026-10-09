@@ -1051,6 +1051,10 @@ func parseOpenAIStyleUsageNode(usageNode gjson.Result) usage.Detail {
 	if cacheCreation.Exists() {
 		detail.CacheCreationTokens = cacheCreation.Int()
 	}
+	detail.InputTokenSemantics = "inclusive"
+	detail.TokenProvenance = "openai-usage:v1"
+	detail.CacheReadObserved = observedCacheCounter(cached)
+	detail.CacheCreationObserved = observedCacheCounter(cacheCreation)
 	reasoning := usageNode.Get("completion_tokens_details.reasoning_tokens")
 	if !reasoning.Exists() {
 		reasoning = usageNode.Get("output_tokens_details.reasoning_tokens")
@@ -1164,12 +1168,18 @@ func parseClaudeUsageNode(usageNode gjson.Result) usage.Detail {
 		nonReasoningOutput = 0
 	}
 	detail := usage.Detail{
-		InputTokens:         usageNode.Get("input_tokens").Int(),
-		OutputTokens:        rawOutputTokens,
-		ReasoningTokens:     reasoningTokens,
-		CachedTokens:        cacheReadTokens,
-		CacheReadTokens:     cacheReadTokens,
-		CacheCreationTokens: cacheCreationTokens,
+		InputTokenSemantics:     "exclusive",
+		TokenProvenance:         "claude-messages:v1",
+		CacheReadObserved:       observedCacheCounter(usageNode.Get("cache_read_input_tokens")),
+		CacheCreationObserved:   observedCacheCounter(usageNode.Get("cache_creation_input_tokens")),
+		CacheCreation5mObserved: observedCacheCounter(usageNode.Get("cache_creation.ephemeral_5m_input_tokens")),
+		CacheCreation1hObserved: observedCacheCounter(usageNode.Get("cache_creation.ephemeral_1h_input_tokens")),
+		InputTokens:             usageNode.Get("input_tokens").Int(),
+		OutputTokens:            rawOutputTokens,
+		ReasoningTokens:         reasoningTokens,
+		CachedTokens:            cacheReadTokens,
+		CacheReadTokens:         cacheReadTokens,
+		CacheCreationTokens:     cacheCreationTokens,
 	}
 	if detail.CachedTokens == 0 {
 		detail.CachedTokens = detail.CacheCreationTokens
