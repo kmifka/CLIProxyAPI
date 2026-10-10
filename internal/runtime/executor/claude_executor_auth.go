@@ -73,6 +73,12 @@ func isClaudeOAuthScope403(err error) bool {
 }
 
 func (e *ClaudeExecutor) PrepareRequestAuth(ctx context.Context, auth *cliproxyauth.Auth) (*cliproxyauth.Auth, error) {
+	if auth != nil {
+		// Keep profile writes private to this request attempt.
+		snapshot := *auth
+		snapshot.Metadata = claudeauth.CloneMetadata(&auth.Metadata)
+		auth = &snapshot
+	}
 	if auth == nil || !e.ShouldPrepareRequestAuth(auth) {
 		return auth, nil
 	}

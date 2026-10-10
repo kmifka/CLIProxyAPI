@@ -159,6 +159,27 @@ func ReadDeviceIDPool(metadata *map[string]any) any {
 	}
 }
 
+// CloneMetadata snapshots credential metadata under the same lock as its writers.
+// Device pool slices are copied because request preparation may repair the pool.
+func CloneMetadata(metadata *map[string]any) map[string]any {
+	claudeDevicePoolMu.Lock()
+	defer claudeDevicePoolMu.Unlock()
+	out := make(map[string]any)
+	if metadata == nil {
+		return out
+	}
+	for key, value := range *metadata {
+		switch typed := value.(type) {
+		case []string:
+			value = append([]string(nil), typed...)
+		case []any:
+			value = append([]any(nil), typed...)
+		}
+		out[key] = value
+	}
+	return out
+}
+
 // StoreDeviceIDPool writes a defensive copy of deviceIDs under the device pool lock.
 func StoreDeviceIDPool(metadata *map[string]any, deviceIDs []string) {
 	if metadata == nil {

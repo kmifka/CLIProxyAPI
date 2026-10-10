@@ -39,27 +39,33 @@ func TestClaudeExecutorPrepareRequestAuthIsRaceFreeOnSharedCredential(t *testing
 	ctx := context.Background()
 
 	var wg sync.WaitGroup
+	start := make(chan struct{})
 	for i := 0; i < 32; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			// ShouldPrepareRequestAuth reads the same map the writers below mutate.
-			if executor.ShouldPrepareRequestAuth(auth) {
-				if _, err := executor.PrepareRequestAuth(ctx, auth); err != nil {
-					t.Errorf("PrepareRequestAuth() error = %v", err)
-				}
+			<-start
+			prepared, err := executor.PrepareRequestAuth(ctx, auth)
+			if err != nil {
+				t.Errorf("PrepareRequestAuth() error = %v", err)
 				return
 			}
-			_ = executor.ShouldPrepareRequestAuth(auth)
+			if prepared == auth {
+				t.Error("PrepareRequestAuth returned shared credential instead of request snapshot")
+			}
+			if got := claudeauth.ReadMetadataString(&prepared.Metadata, "account_uuid"); got != "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" {
+				t.Errorf("account_uuid = %q, want the fetched profile account", got)
+			}
+			if executor.ShouldPrepareRequestAuth(prepared) {
+				t.Error("prepared snapshot still needs credential identity")
+			}
 		}()
 	}
+	close(start)
 	wg.Wait()
 
-	if got := claudeauth.ReadMetadataString(&auth.Metadata, "account_uuid"); got != "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" {
-		t.Fatalf("account_uuid = %q, want the fetched profile account", got)
-	}
-	if !claudeauth.HasCanonicalDeviceIDPool(claudeauth.ReadDeviceIDPool(&auth.Metadata)) {
-		t.Fatal("device ID pool was not established under concurrency")
+	if len(auth.Metadata) != 0 {
+		t.Fatalf("request preparation mutated shared metadata: %v", auth.Metadata)
 	}
 }
 
