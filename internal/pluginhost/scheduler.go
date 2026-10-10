@@ -14,11 +14,17 @@ func (h *Host) PickAuth(ctx context.Context, req pluginapi.SchedulerPickRequest)
 		return pluginapi.SchedulerPickResponse{}, false, nil
 	}
 
+	if record.plugin.Capabilities.SchedulerPreference && h.isPluginFused(record.id) {
+		return requiredSchedulerReject("required scheduler fused"), true, nil
+	}
 	resp, handled, errPick := h.callScheduler(ctx, *record, req)
-	if errPick != nil || !handled {
+	if errPick != nil {
 		return resp, handled, errPick
 	}
-	if !resp.Handled {
+	if !handled || !resp.Handled {
+		if record.plugin.Capabilities.SchedulerPreference {
+			return requiredSchedulerReject("required scheduler unavailable"), true, nil
+		}
 		return pluginapi.SchedulerPickResponse{}, false, nil
 	}
 
@@ -50,12 +56,18 @@ func (h *Host) SchedulerWantsAcrossPriorities() bool {
 	return schedulerWantsAcrossPriorities(record.plugin.Capabilities)
 }
 
+// Required membership capability survives a fuse so later requests cannot
+// silently fall through to a lower scheduler or native dispatch.
+func requiredSchedulerReject(reason string) pluginapi.SchedulerPickResponse {
+	return pluginapi.SchedulerPickResponse{Handled: true, Reject: true, RejectCode: "auth_unavailable", RejectReason: reason}
+}
+
 func (h *Host) schedulerRecord() *capabilityRecord {
 	if h == nil {
 		return nil
 	}
 	for _, record := range h.activeRecords() {
-		if h.isPluginFused(record.id) || record.plugin.Capabilities.Scheduler == nil {
+		if record.plugin.Capabilities.Scheduler == nil || (h.isPluginFused(record.id) && !record.plugin.Capabilities.SchedulerPreference) {
 			continue
 		}
 		copyRecord := record
