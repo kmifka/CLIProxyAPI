@@ -2,6 +2,7 @@ package pluginhost
 
 import (
 	"context"
+	"errors"
 	"strings"
 
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/pluginapi"
@@ -19,6 +20,17 @@ func (h *Host) PickAuth(ctx context.Context, req pluginapi.SchedulerPickRequest)
 	}
 	resp, handled, errPick := h.callScheduler(ctx, *record, req)
 	if errPick != nil {
+		// Only required scheduler ABI availability failures receive a marker.
+		// Generic RPC/provider errors retain their original type and status.
+		if record.plugin.Capabilities.SchedulerPreference {
+			var abiErr rpcError
+			if errors.As(errPick, &abiErr) {
+				switch abiErr.Code {
+				case "plugin_panic", "plugin_fused", "scheduler_unavailable":
+					return resp, handled, requiredSchedulerError{cause: errPick, class: abiErr.Code}
+				}
+			}
+		}
 		return resp, handled, errPick
 	}
 	if !handled || !resp.Handled {
