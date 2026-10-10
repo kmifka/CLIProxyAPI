@@ -601,6 +601,21 @@ func (m *Manager) refreshAuthForRequestAtEpoch(ctx context.Context, id, failedAc
 		return nil, errors.New("auth id is empty")
 	}
 
+	// Only Home-owned explicit refreshes coalesce across the per-ID lock.
+	// Capture scalar credential identity/version while protected by m.mu; never
+	// retain a published Auth pointer (runtime updates can mutate it in place).
+	var homeObserved bool
+	var homeEpoch uint64
+	var homeIndex, homeProvider, homeAccess, homeRefresh string
+	if forceRefresh && m.HomeEnabled() {
+		m.mu.RLock()
+		if entry := m.auths[id]; entry != nil {
+			homeObserved = true
+			homeEpoch, homeIndex, homeProvider = entry.RegistrationEpoch, entry.Index, entry.Provider
+			homeAccess, homeRefresh = authAccessToken(entry), authRefreshToken(entry)
+		}
+		m.mu.RUnlock()
+	}
 	lockValue, _ := m.refreshLocks.LoadOrStore(id, &authRefreshLock{})
 	lock, _ := lockValue.(*authRefreshLock)
 	if lock == nil {
@@ -624,6 +639,14 @@ func (m *Manager) refreshAuthForRequestAtEpoch(ctx context.Context, id, failedAc
 	}
 	if registrationEpoch != 0 && auth.RegistrationEpoch != registrationEpoch {
 		return nil, errors.New("auth registration changed before refresh")
+	}
+	if homeObserved {
+		if auth.RegistrationEpoch != homeEpoch || auth.Index != homeIndex || auth.Provider != homeProvider {
+			return nil, errors.New("auth registration changed before refresh")
+		}
+		if authAccessToken(auth) != homeAccess || authRefreshToken(auth) != homeRefresh {
+			return auth.Clone(), nil
+		}
 	}
 	if hasDisabledInvalidGrantFailure(auth) && !forceRefresh {
 		return nil, errors.New("auth is disabled with invalid grant")
