@@ -21,12 +21,12 @@ func TestSchedulerPreferenceRPCContract(t *testing.T) {
 			t.Fatalf("valid subset rejected: %+v", r)
 		}
 		r.EligibleAuthIDs = []string{"absent"}
-		if _, ok, _ := normalizeSchedulerResponse(r, req); ok {
-			t.Fatal("invented membership accepted")
+		if result, ok, _ := normalizeSchedulerResponse(r, req); !ok || !result.Reject {
+			t.Fatal("invented membership did not fail closed")
 		}
 		r.EligibleAuthIDs = nil
-		if _, ok, _ := normalizeSchedulerResponse(r, req); ok {
-			t.Fatal("empty subset accepted")
+		if result, ok, _ := normalizeSchedulerResponse(r, req); !ok || !result.Reject {
+			t.Fatal("empty subset did not fail closed")
 		}
 	}
 }

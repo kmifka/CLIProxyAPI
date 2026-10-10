@@ -967,6 +967,11 @@ func (m *Manager) pickHomeDispatchSelection(ctx context.Context, model string, o
 	for _, authID := range excludedAuthIDList {
 		excludedAuthIDs[authID] = struct{}{}
 	}
+	// A retained websocket lease has no membership revalidation RPC. Do not
+	// admit an explicit entitlement tier through that legacy shortcut.
+	if homeTierRequiresMembership(opts) && cliproxyexecutor.DownstreamWebsocket(ctx) {
+		return nil, &Error{Code: "auth_unavailable", Message: "tier membership requires fresh Home dispatch", HTTPStatus: http.StatusServiceUnavailable}
+	}
 	retained, retainedOK, errRetained := m.retainedHomeSessionSelection(ctx, opts, requestedModel, excludedAuthIDs)
 	if errRetained != nil {
 		return nil, errRetained
@@ -1015,7 +1020,7 @@ func (m *Manager) pickHomeDispatchSelection(ctx context.Context, model string, o
 			delete(opts.Metadata, cliproxyexecutor.ParentSessionIDMetadataKey)
 		}
 	}
-	dispatchHeaders := homeDispatchHeaders(ctx, opts.Headers)
+	dispatchHeaders := trustedHomeDispatchHeaders(ctx, opts)
 	if opts.Metadata != nil {
 		if nodeKind, ok := opts.Metadata[cliproxyexecutor.NodeKindMetadataKey].(string); ok && strings.TrimSpace(nodeKind) != "" {
 			if dispatchHeaders == nil {

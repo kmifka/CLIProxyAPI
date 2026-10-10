@@ -25,6 +25,9 @@ func (h *Host) PickAuth(ctx context.Context, req pluginapi.SchedulerPickRequest)
 	resp, valid, reason := normalizeSchedulerResponse(resp, req)
 	if !valid {
 		log.WithField("plugin_id", record.id).Warnf("pluginhost: scheduler returned invalid response: %s", reason)
+		if record.plugin.Capabilities.SchedulerPreference {
+			return pluginapi.SchedulerPickResponse{Handled: true, Reject: true, RejectCode: "auth_unavailable", RejectReason: "invalid required scheduler response"}, true, nil
+		}
 		return pluginapi.SchedulerPickResponse{}, false, nil
 	}
 	return resp, true, nil
@@ -87,11 +90,11 @@ func (h *Host) callScheduler(ctx context.Context, record capabilityRecord, req p
 func normalizeSchedulerResponse(resp pluginapi.SchedulerPickResponse, req pluginapi.SchedulerPickRequest) (pluginapi.SchedulerPickResponse, bool, string) {
 	if req.PreferenceOnly && !resp.Reject {
 		if len(resp.EligibleAuthIDs) == 0 {
-			return pluginapi.SchedulerPickResponse{}, false, "empty preference"
+			return pluginapi.SchedulerPickResponse{Handled: true, Reject: true, RejectCode: "auth_unavailable", RejectReason: "empty scheduler membership"}, true, ""
 		}
 		for _, id := range resp.EligibleAuthIDs {
 			if !schedulerCandidateExists(req.Candidates, id) {
-				return pluginapi.SchedulerPickResponse{}, false, "unknown preference id"
+				return pluginapi.SchedulerPickResponse{Handled: true, Reject: true, RejectCode: "auth_unavailable", RejectReason: "scheduler membership outside native candidates"}, true, ""
 			}
 		}
 		return resp, true, ""
