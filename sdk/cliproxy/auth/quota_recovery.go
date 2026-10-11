@@ -9,7 +9,7 @@ import (
 )
 
 func isVerifiedUsageLimitFailure(e *Error) bool {
-	if e == nil || e.HTTPStatus != 429 {
+	if e == nil || e.HTTPStatus != 429 || e.Code == ErrorCodeForceCooldown {
 		return false
 	}
 	var body struct {
