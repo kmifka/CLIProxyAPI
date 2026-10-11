@@ -41,7 +41,15 @@ func (m *Manager) ReconcileVerifiedQuota(ctx context.Context, base *Auth, observ
 	incidentReset := current.Quota.NextRecoverAt
 	var models []string
 	for name, s := range current.ModelStates {
-		if s == nil || !s.Quota.Exceeded || s.Quota.Reason != "quota" || !s.Quota.NextRecoverAt.Equal(incidentReset) || s.UpdatedAt.After(observed) || !isVerifiedUsageLimitFailure(s.LastError) {
+		if s == nil || !s.Quota.Exceeded || !s.Quota.NextRecoverAt.Equal(incidentReset) || s.UpdatedAt.After(observed) {
+			continue
+		}
+		// MarkResult propagates credential quota to otherwise healthy siblings
+		// without copying the failing route's LastError. Require the exact
+		// incident deadline and no independent error or longer retry hold.
+		original := s.Quota.Reason == "quota" && isVerifiedUsageLimitFailure(s.LastError)
+		propagated := s.Quota.Reason == "credential_quota" && s.LastError == nil && s.NextRetryAfter.Equal(incidentReset)
+		if !original && !propagated {
 			continue
 		}
 		resetModelState(s, now)
