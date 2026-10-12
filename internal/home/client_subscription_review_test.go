@@ -21,7 +21,7 @@ type reviewSubscription struct {
 }
 
 // All handlers are joined. Only a loopback ephemeral listener is used.
-func reviewClient(t *testing.T, subscribe func(net.Conn, int)) (*Client, <-chan reviewSubscription) {
+func reviewClient(t *testing.T, subscribe func(net.Conn, int), helloGate ...func(net.Conn, int) bool) (*Client, <-chan reviewSubscription) {
 	t.Helper()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -29,6 +29,7 @@ func reviewClient(t *testing.T, subscribe func(net.Conn, int)) (*Client, <-chan 
 	}
 	events := make(chan reviewSubscription, 8)
 	var count atomic.Int32
+	var hellos atomic.Int32
 	var handlers sync.WaitGroup
 	var mu sync.Mutex
 	var connections []net.Conn
@@ -58,6 +59,9 @@ func reviewClient(t *testing.T, subscribe func(net.Conn, int)) (*Client, <-chan 
 					response := "+OK\r\n"
 					switch strings.ToUpper(args[0]) {
 					case "HELLO":
+						if len(helloGate) > 0 && helloGate[0](conn, int(hellos.Add(1))) {
+							continue
+						}
 						response = "%6\r\n$6\r\nserver\r\n$5\r\nredis\r\n$5\r\nproto\r\n:3\r\n$2\r\nid\r\n:1\r\n$4\r\nmode\r\n$10\r\nstandalone\r\n$4\r\nrole\r\n$6\r\nmaster\r\n$7\r\nmodules\r\n*0\r\n"
 					case "GET":
 						response = "$15\r\nhost: 127.0.0.1\r\n"
@@ -106,6 +110,24 @@ func reviewWait[T any](t *testing.T, ch <-chan T) T {
 		var zero T
 		return zero
 	}
+}
+
+func TestReviewSubscriptionCanceledDuringHELLO(t *testing.T) {
+	entered := make(chan struct{})
+	c, _ := reviewClient(t, func(net.Conn, int) {}, func(_ net.Conn, index int) bool {
+		if index == 2 {
+			close(entered)
+			return true
+		}
+		return false
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- c.RunConfigSubscriberLifetime(ctx, func([]byte) error { return nil }, nil) }()
+	reviewWait(t, entered)
+	cancel()
+	reviewWait(t, done)
 }
 
 func TestReviewSubscriptionCancelBeforeACK(t *testing.T) {
