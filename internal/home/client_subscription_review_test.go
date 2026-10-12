@@ -128,6 +128,15 @@ func TestReviewSubscriptionCanceledDuringHELLO(t *testing.T) {
 	reviewWait(t, entered)
 	cancel()
 	reviewWait(t, done)
+	// HELLO cancellation must leave normal command/release transports usable.
+	drain, stop := context.WithTimeout(context.Background(), time.Second)
+	defer stop()
+	if _, err := c.GetConfig(drain); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.PushConcurrencyRelease(drain, ConcurrencyReleaseFrame{CredentialID: "fixture", Model: "fixture", ReleaseSeq: 1}); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestReviewSubscriptionCancelBeforeACK(t *testing.T) {

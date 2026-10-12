@@ -1963,6 +1963,20 @@ func (c *Client) RunConfigSubscriberLifetime(ctx context.Context, onConfig func(
 		}
 		return c.endConfigSubscriberLifetime(errSubClient)
 	}
+	// PubSub.Subscribe holds its mutex while initializing HELLO, so PubSub.Close
+	// cannot interrupt that read. Give this lifetime its own client and close its
+	// socket on cancellation before go-redis starts connection initialization.
+	options := cloneRedisOptions(sub.Options())
+	baseDialer := options.Dialer
+	options.Dialer = func(dialCtx context.Context, network, address string) (net.Conn, error) {
+		conn, err := baseDialer(dialCtx, network, address)
+		if err != nil {
+			return nil, err
+		}
+		return newPluginSyncCancelableConn(ctx, conn), nil
+	}
+	sub = redis.NewClient(options)
+	defer sub.Close()
 	args, receiveTimeout := c.subscriptionParameters()
 	pubsub := sub.Subscribe(ctx, args...)
 	if pubsub == nil {
