@@ -1900,6 +1900,9 @@ func (c *Client) promoteSubscription() {
 }
 
 func (c *Client) handleSubscriptionPayload(ctx context.Context, channel string, payload string, onConfig func([]byte) error) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	payload = strings.TrimSpace(payload)
 	if payload == "" {
 		return nil
@@ -1946,6 +1949,9 @@ func (c *Client) RunConfigSubscriberLifetime(ctx context.Context, onConfig func(
 		}
 		return c.endConfigSubscriberLifetime(errGet)
 	}
+	if err := ctx.Err(); err != nil {
+		return c.endConfigSubscriberLifetime(err)
+	}
 	if errApply := onConfig(raw); errApply != nil {
 		return c.endConfigSubscriberLifetime(errApply)
 	}
@@ -1965,6 +1971,10 @@ func (c *Client) RunConfigSubscriberLifetime(ctx context.Context, onConfig func(
 		}
 		return c.endConfigSubscriberLifetime(ErrNotConnected)
 	}
+
+	// Cancel only this subscription: command and release clients must survive drain.
+	stopCancelClose := context.AfterFunc(ctx, func() { _ = pubsub.Close() })
+	defer stopCancelClose()
 
 	if errACK := receiveSubscriptionACKs(ctx, pubsub, receiveTimeout, args[:1]); errACK != nil {
 		if ctx.Err() == nil {
@@ -1990,8 +2000,14 @@ func (c *Client) RunConfigSubscriberLifetime(ctx context.Context, onConfig func(
 	}
 
 	for {
+		if err := ctx.Err(); err != nil {
+			return c.endConfigSubscriberLifetimeWithSubscription(err, pubsub, "cancellation")
+		}
 		_, receiveTimeout = c.subscriptionParameters()
 		event, errReceive := pubsub.ReceiveTimeout(ctx, receiveTimeout)
+		if err := ctx.Err(); err != nil {
+			return c.endConfigSubscriberLifetimeWithSubscription(err, pubsub, "cancellation")
+		}
 		if errReceive != nil {
 			if ctx.Err() == nil {
 				if c.heartbeatOK.Load() {
