@@ -27,6 +27,11 @@ func AuthenticateRegisteredRequest(r *http.Request, authorize func(*http.Request
 	if r == nil || r.URL == nil || !RegisteredAudioRoute(r.Method, r.URL.Path) || r.URL.RawQuery != "" || r.URL.RawPath != "" {
 		return nil, &RegisteredRequestError{Code: "unregistered_route", Status: 403}
 	}
+	return authenticateRegisteredIdentity(r, authorize, bind)
+}
+
+// authenticateRegisteredIdentity is shared only after each route's own fence.
+func authenticateRegisteredIdentity(r *http.Request, authorize func(*http.Request) error, bind func(*RegisteredRequestIdentity) error) (*RegisteredRequestIdentity, error) {
 	if authorize == nil || bind == nil {
 		return nil, &RegisteredRequestError{Code: "route_policy_unavailable", Status: 503}
 	}
