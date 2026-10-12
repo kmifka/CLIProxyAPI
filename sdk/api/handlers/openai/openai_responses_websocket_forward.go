@@ -71,7 +71,41 @@ func (h *OpenAIResponsesAPIHandler) forwardResponsesWebsocket(
 		keepAliveC = keepAliveTicker.C
 	}
 
+	handleTerminalError := func(errMsg *interfaces.ErrorMessage) ([]byte, string, []string, *interfaces.ErrorMessage, error) {
+		h.LoggingAPIResponseError(context.WithValue(context.Background(), "gin", c), errMsg)
+		if opts.suppressError != nil && opts.suppressError(errMsg) {
+			cancel(errMsg.Error)
+			return completedOutput, completedResponseID, sortedStringSet(pendingToolCallIDs), errMsg, nil
+		}
+		markAPIResponseTimestamp(c)
+		if matched, errClose := writer.closeForUpstreamError(errMsg.Error); matched {
+			cancel(errMsg.Error)
+			if errClose != nil {
+				return completedOutput, completedResponseID, sortedStringSet(pendingToolCallIDs), errMsg, errClose
+			}
+			return completedOutput, completedResponseID, sortedStringSet(pendingToolCallIDs), errMsg, websocket.ErrCloseSent
+		}
+
+		errorPayload, wrote, errTerminate := writeResponsesWebsocketTerminalError(writer, wsTimelineLog, errMsg, nil)
+		if wrote {
+			log.Infof(
+				"responses websocket: downstream_out id=%s type=%d event=%s payload=%s",
+				sessionID,
+				websocket.TextMessage,
+				websocketPayloadEventType(errorPayload),
+				websocketPayloadPreview(errorPayload),
+			)
+		}
+		cancel(errMsg.Error)
+		return completedOutput, completedResponseID, sortedStringSet(pendingToolCallIDs), errMsg, errTerminate
+	}
+
 	for {
+		// Cancellation must not race a queued replay signal or EOF.
+		if err := c.Request.Context().Err(); err != nil {
+			cancel(err)
+			return completedOutput, completedResponseID, sortedStringSet(pendingToolCallIDs), nil, err
+		}
 		select {
 		case <-c.Request.Context().Done():
 			cancel(c.Request.Context().Err())
@@ -91,34 +125,18 @@ func (h *OpenAIResponsesAPIHandler) forwardResponsesWebsocket(
 				return completedOutput, completedResponseID, sortedStringSet(pendingToolCallIDs), nil, nil
 			}
 
-			h.LoggingAPIResponseError(context.WithValue(context.Background(), "gin", c), errMsg)
-			if opts.suppressError != nil && opts.suppressError(errMsg) {
-				cancel(errMsg.Error)
-				return completedOutput, completedResponseID, sortedStringSet(pendingToolCallIDs), errMsg, nil
-			}
-			markAPIResponseTimestamp(c)
-			if matched, errClose := writer.closeForUpstreamError(errMsg.Error); matched {
-				cancel(errMsg.Error)
-				if errClose != nil {
-					return completedOutput, completedResponseID, sortedStringSet(pendingToolCallIDs), errMsg, errClose
-				}
-				return completedOutput, completedResponseID, sortedStringSet(pendingToolCallIDs), errMsg, websocket.ErrCloseSent
-			}
-
-			errorPayload, wrote, errTerminate := writeResponsesWebsocketTerminalError(writer, wsTimelineLog, errMsg, nil)
-			if wrote {
-				log.Infof(
-					"responses websocket: downstream_out id=%s type=%d event=%s payload=%s",
-					sessionID,
-					websocket.TextMessage,
-					websocketPayloadEventType(errorPayload),
-					websocketPayloadPreview(errorPayload),
-				)
-			}
-			cancel(errMsg.Error)
-			return completedOutput, completedResponseID, sortedStringSet(pendingToolCallIDs), errMsg, errTerminate
+			return handleTerminalError(errMsg)
 		case chunk, ok := <-data:
 			if !ok {
+				// Producers publish their terminal error before closing data. A select
+				// may choose EOF first; preserve that causal error without waiting.
+				select {
+				case errMsg, open := <-errs:
+					if open && errMsg != nil {
+						return handleTerminalError(errMsg)
+					}
+				default:
+				}
 				if opts.duplexStream != nil && opts.duplexStream() {
 					// A duplex stream ends with its socket, not an individual response.
 					// The data channel may close before select observes its final error.

@@ -1127,7 +1127,7 @@ func validPlugin(plugin pluginapi.Plugin) bool {
 		return false
 	}
 	caps := plugin.Capabilities
-	return caps.ModelRegistrar != nil ||
+	return caps.Inference != nil || caps.ModelRegistrar != nil ||
 		caps.ModelProvider != nil ||
 		caps.AuthProvider != nil ||
 		caps.FrontendAuthProvider != nil ||

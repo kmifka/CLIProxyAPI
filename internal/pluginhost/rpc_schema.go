@@ -19,6 +19,7 @@ type rpcRegistration struct {
 }
 
 type rpcCapabilities struct {
+	Inference                     bool                         `json:"inference,omitempty"`
 	ModelRegistrar                bool                         `json:"model_registrar"`
 	ModelProvider                 bool                         `json:"model_provider"`
 	AuthProvider                  bool                         `json:"auth_provider"`

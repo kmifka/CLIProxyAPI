@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -2190,9 +2192,13 @@ func TestXAIWebsockets_KeepalivePingDuringUpload_WithSession(t *testing.T) {
 	serverPongCh := make(chan string, 1)
 	inWriteHook := make(chan struct{})
 	pongDeliveredDuringWrite := make(chan struct{})
+	var enteredOnce sync.Once
+	var writeCalls atomic.Int32
+	var handlers sync.WaitGroup
 
 	testWebsocketWritePayloadHook = func(conn *websocket.Conn) {
-		close(inWriteHook)
+		writeCalls.Add(1)
+		enteredOnce.Do(func() { close(inWriteHook) })
 		select {
 		case <-pongDeliveredDuringWrite:
 		case <-time.After(2 * time.Second):
@@ -2202,6 +2208,8 @@ func TestXAIWebsockets_KeepalivePingDuringUpload_WithSession(t *testing.T) {
 	defer func() { testWebsocketWritePayloadHook = nil }()
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handlers.Add(1)
+		defer handlers.Done()
 		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
 			t.Errorf("upgrade websocket: %v", err)
@@ -2214,11 +2222,16 @@ func TestXAIWebsockets_KeepalivePingDuringUpload_WithSession(t *testing.T) {
 			return nil
 		})
 
+		requestRead := make(chan struct{})
+		readerDone := make(chan struct{})
 		go func() {
+			defer close(readerDone)
+			var requestOnce sync.Once
 			for {
 				if _, _, errReadLoop := conn.ReadMessage(); errReadLoop != nil {
 					return
 				}
+				requestOnce.Do(func() { close(requestRead) })
 			}
 		}()
 
@@ -2242,12 +2255,30 @@ func TestXAIWebsockets_KeepalivePingDuringUpload_WithSession(t *testing.T) {
 			return
 		}
 
+		// A response follows receipt of the application request, not just its pong.
+		select {
+		case <-requestRead:
+		case <-readerDone:
+			t.Error("client disconnected before upload completed")
+			return
+		}
 		respPayload := []byte(`{"type":"response.done","response":{"id":"resp-1","status":"completed","output":[]}}`)
-		_ = conn.WriteMessage(websocket.TextMessage, respPayload)
+		if err := conn.WriteMessage(websocket.TextMessage, respPayload); err != nil {
+			t.Errorf("write terminal response: %v", err)
+		}
+		// Keep the socket alive until the client accepts terminal and closes it.
+		<-readerDone
 	}))
 	defer server.Close()
 
 	exec := NewXAIWebsocketsExecutor(&config.Config{})
+	defer func() {
+		exec.CloseExecutionSession("xai-session-ping-test")
+		handlers.Wait()
+		if got := writeCalls.Load(); got != 1 {
+			t.Errorf("payload write calls = %d, want 1", got)
+		}
+	}()
 	auth := &cliproxyauth.Auth{
 		ID:       "auth-xai-session-ping",
 		Provider: "xai",
@@ -2310,11 +2341,16 @@ func TestXAIWebsockets_KeepalivePingDuringUpload_Sessionless(t *testing.T) {
 			return nil
 		})
 
+		requestRead := make(chan struct{})
+		readerDone := make(chan struct{})
 		go func() {
+			defer close(readerDone)
+			var requestOnce sync.Once
 			for {
 				if _, _, errReadLoop := conn.ReadMessage(); errReadLoop != nil {
 					return
 				}
+				requestOnce.Do(func() { close(requestRead) })
 			}
 		}()
 
@@ -2338,8 +2374,14 @@ func TestXAIWebsockets_KeepalivePingDuringUpload_Sessionless(t *testing.T) {
 			return
 		}
 
+		// Pong receipt is not application upload receipt. Wait for the request
+		// before terminal output, then keep the peer alive until client cleanup.
+		<-requestRead
 		respPayload := []byte(`{"type":"response.done","response":{"id":"resp-1","status":"completed","output":[]}}`)
-		_ = conn.WriteMessage(websocket.TextMessage, respPayload)
+		if err := conn.WriteMessage(websocket.TextMessage, respPayload); err != nil {
+			t.Errorf("write terminal response: %v", err)
+		}
+		<-readerDone
 	}))
 	defer server.Close()
 

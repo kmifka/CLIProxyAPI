@@ -70,6 +70,7 @@ type ConfigField struct {
 
 // Capabilities groups the optional host integration interfaces exposed by a plugin.
 type Capabilities struct {
+	Inference InferencePlugin
 	// ModelRegistrar contributes development-time model metadata to the host registry.
 	ModelRegistrar ModelRegistrar
 	// ModelProvider contributes provider-native static and per-auth model metadata.

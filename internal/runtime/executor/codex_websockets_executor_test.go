@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -2642,9 +2643,13 @@ func TestCodexWebsockets_KeepalivePingDuringUpload_WithSession(t *testing.T) {
 	serverPongCh := make(chan string, 1)
 	inWriteHook := make(chan struct{})
 	pongDeliveredDuringWrite := make(chan struct{})
+	var enteredOnce sync.Once
+	var writeCalls atomic.Int32
+	var handlers sync.WaitGroup
 
 	testWebsocketWritePayloadHook = func(conn *websocket.Conn) {
-		close(inWriteHook)
+		writeCalls.Add(1)
+		enteredOnce.Do(func() { close(inWriteHook) })
 		// Wait until server confirms pong was received before allowing write to finish.
 		select {
 		case <-pongDeliveredDuringWrite:
@@ -2655,6 +2660,8 @@ func TestCodexWebsockets_KeepalivePingDuringUpload_WithSession(t *testing.T) {
 	defer func() { testWebsocketWritePayloadHook = nil }()
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handlers.Add(1)
+		defer handlers.Done()
 		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
 			t.Errorf("upgrade websocket: %v", err)
@@ -2667,14 +2674,16 @@ func TestCodexWebsockets_KeepalivePingDuringUpload_WithSession(t *testing.T) {
 			return nil
 		})
 
-		// Start server reader loop so server processes control frames.
-		readErrCh := make(chan error, 1)
+		requestRead := make(chan struct{})
+		readerDone := make(chan struct{})
 		go func() {
+			defer close(readerDone)
+			var requestOnce sync.Once
 			for {
 				if _, _, errRead := conn.ReadMessage(); errRead != nil {
-					readErrCh <- errRead
 					return
 				}
+				requestOnce.Do(func() { close(requestRead) })
 			}
 		}()
 
@@ -2702,8 +2711,19 @@ func TestCodexWebsockets_KeepalivePingDuringUpload_WithSession(t *testing.T) {
 		}
 
 		// Now send terminal response.
+		// A response follows receipt of the application request, not just its pong.
+		select {
+		case <-requestRead:
+		case <-readerDone:
+			t.Error("client disconnected before upload completed")
+			return
+		}
 		respPayload := []byte(`{"type":"response.completed","response":{"id":"resp-1","status":"completed","output":[]}}`)
-		_ = conn.WriteMessage(websocket.TextMessage, respPayload)
+		if err := conn.WriteMessage(websocket.TextMessage, respPayload); err != nil {
+			t.Errorf("write terminal response: %v", err)
+		}
+		// Keep the socket alive until the client accepts terminal and closes it.
+		<-readerDone
 	}))
 	defer server.Close()
 
@@ -2712,6 +2732,13 @@ func TestCodexWebsockets_KeepalivePingDuringUpload_WithSession(t *testing.T) {
 			DisableImageGeneration: config.DisableImageGenerationAll,
 		},
 	})
+	defer func() {
+		exec.CloseExecutionSession("session-ping-test")
+		handlers.Wait()
+		if got := writeCalls.Load(); got != 1 {
+			t.Errorf("payload write calls = %d, want 1", got)
+		}
+	}()
 	auth := &cliproxyauth.Auth{ID: "auth-session-ping", Attributes: map[string]string{"api_key": "sk-test", "base_url": server.URL}}
 	req := cliproxyexecutor.Request{
 		Model:   "gpt-5.6-sol",
@@ -2742,9 +2769,13 @@ func TestCodexWebsockets_KeepalivePingDuringUpload_Sessionless(t *testing.T) {
 	serverPongCh := make(chan string, 1)
 	inWriteHook := make(chan struct{})
 	pongDeliveredDuringWrite := make(chan struct{})
+	var enteredOnce sync.Once
+	var writeCalls atomic.Int32
+	var handlers sync.WaitGroup
 
 	testWebsocketWritePayloadHook = func(conn *websocket.Conn) {
-		close(inWriteHook)
+		writeCalls.Add(1)
+		enteredOnce.Do(func() { close(inWriteHook) })
 		select {
 		case <-pongDeliveredDuringWrite:
 		case <-time.After(2 * time.Second):
@@ -2754,6 +2785,8 @@ func TestCodexWebsockets_KeepalivePingDuringUpload_Sessionless(t *testing.T) {
 	defer func() { testWebsocketWritePayloadHook = nil }()
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handlers.Add(1)
+		defer handlers.Done()
 		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
 			t.Errorf("upgrade websocket: %v", err)
@@ -2766,11 +2799,16 @@ func TestCodexWebsockets_KeepalivePingDuringUpload_Sessionless(t *testing.T) {
 			return nil
 		})
 
+		requestRead := make(chan struct{})
+		readerDone := make(chan struct{})
 		go func() {
+			defer close(readerDone)
+			var requestOnce sync.Once
 			for {
 				if _, _, errRead := conn.ReadMessage(); errRead != nil {
 					return
 				}
+				requestOnce.Do(func() { close(requestRead) })
 			}
 		}()
 
@@ -2797,10 +2835,25 @@ func TestCodexWebsockets_KeepalivePingDuringUpload_Sessionless(t *testing.T) {
 			return
 		}
 
+		select {
+		case <-requestRead:
+		case <-readerDone:
+			t.Error("client disconnected before upload completed")
+			return
+		}
 		respPayload := []byte(`{"type":"response.completed","response":{"id":"resp-1","status":"completed","output":[]}}`)
-		_ = conn.WriteMessage(websocket.TextMessage, respPayload)
+		if err := conn.WriteMessage(websocket.TextMessage, respPayload); err != nil {
+			t.Errorf("write terminal response: %v", err)
+		}
+		<-readerDone
 	}))
 	defer server.Close()
+	defer func() {
+		handlers.Wait()
+		if got := writeCalls.Load(); got != 1 {
+			t.Errorf("payload write calls = %d, want 1", got)
+		}
+	}()
 
 	exec := NewCodexWebsocketsExecutor(&config.Config{
 		SDKConfig: config.SDKConfig{
@@ -2834,9 +2887,13 @@ func TestCodexWebsockets_KeepalivePingDuringUpload_NonstreamSessionless(t *testi
 	serverPongCh := make(chan string, 1)
 	inWriteHook := make(chan struct{})
 	pongDeliveredDuringWrite := make(chan struct{})
+	var enteredOnce sync.Once
+	var writeCalls atomic.Int32
+	var handlers sync.WaitGroup
 
 	testWebsocketWritePayloadHook = func(conn *websocket.Conn) {
-		close(inWriteHook)
+		writeCalls.Add(1)
+		enteredOnce.Do(func() { close(inWriteHook) })
 		select {
 		case <-pongDeliveredDuringWrite:
 		case <-time.After(2 * time.Second):
@@ -2846,6 +2903,8 @@ func TestCodexWebsockets_KeepalivePingDuringUpload_NonstreamSessionless(t *testi
 	defer func() { testWebsocketWritePayloadHook = nil }()
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handlers.Add(1)
+		defer handlers.Done()
 		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
 			t.Errorf("upgrade websocket: %v", err)
@@ -2858,11 +2917,16 @@ func TestCodexWebsockets_KeepalivePingDuringUpload_NonstreamSessionless(t *testi
 			return nil
 		})
 
+		requestRead := make(chan struct{})
+		readerDone := make(chan struct{})
 		go func() {
+			defer close(readerDone)
+			var requestOnce sync.Once
 			for {
 				if _, _, errRead := conn.ReadMessage(); errRead != nil {
 					return
 				}
+				requestOnce.Do(func() { close(requestRead) })
 			}
 		}()
 
@@ -2889,10 +2953,27 @@ func TestCodexWebsockets_KeepalivePingDuringUpload_NonstreamSessionless(t *testi
 			return
 		}
 
+		// A response follows receipt of the application request, not just its pong.
+		select {
+		case <-requestRead:
+		case <-readerDone:
+			t.Error("client disconnected before upload completed")
+			return
+		}
 		respPayload := []byte(`{"type":"response.completed","response":{"id":"resp-1","status":"completed","output":[]}}`)
-		_ = conn.WriteMessage(websocket.TextMessage, respPayload)
+		if err := conn.WriteMessage(websocket.TextMessage, respPayload); err != nil {
+			t.Errorf("write terminal response: %v", err)
+		}
+		// Keep the socket alive until the client accepts terminal and closes it.
+		<-readerDone
 	}))
 	defer server.Close()
+	defer func() {
+		handlers.Wait()
+		if got := writeCalls.Load(); got != 1 {
+			t.Errorf("payload write calls = %d, want 1", got)
+		}
+	}()
 
 	exec := NewCodexWebsocketsExecutor(&config.Config{
 		SDKConfig: config.SDKConfig{

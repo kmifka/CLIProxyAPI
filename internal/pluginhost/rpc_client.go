@@ -92,6 +92,9 @@ func registerRPCPlugin(ctx context.Context, host *Host, id string, client plugin
 			ExecutorOutputFormats:         append([]string(nil), resp.Capabilities.ExecutorOutputFormats...),
 		},
 	}
+	if resp.Capabilities.Inference {
+		plugin.Capabilities.Inference = adapter
+	}
 	if resp.Capabilities.ModelRegistrar {
 		plugin.Capabilities.ModelRegistrar = adapter
 	}
