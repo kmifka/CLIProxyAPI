@@ -546,6 +546,12 @@ func (c *Client) redisOptionsLocked(addr string) (*redis.Options, error) {
 		MaxRetries:            -1,
 		DialerRetries:         1,
 		ContextTimeoutEnabled: true,
+		// Home speaks a Redis-compatible application protocol, not Redis server
+		// maintenance/handoff notifications. Disable that negotiation before any
+		// pooled or dedicated Conn initializer can share these options: go-redis
+		// v9.19 gives Conn its own optLock while sharing the mutable Mode pointer.
+		// Keep RESP3, native Home reconnect, heartbeat and OAuth refresh intact.
+		MaintNotificationsConfig: &maintnotifications.Config{Mode: maintnotifications.ModeDisabled},
 	}
 	options.Dialer = c.trackedRedisDialer(redis.NewDialer(options))
 	return options, nil
