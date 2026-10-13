@@ -851,7 +851,8 @@ func isAuthBlockedForModel(auth *Auth, model string, now time.Time) (bool, block
 				if state.Status == StatusDisabled {
 					return true, blockReasonDisabled, time.Time{}
 				}
-				stateBlocked, reason, next := availabilityBlock(state.Unavailable, state.Quota.Exceeded, state.NextRetryAfter, state.Quota.NextRecoverAt, now)
+				retry := legacyFailureRetryAfter(state.Unavailable, state.Quota, state.NextRetryAfter, state.LastError, state.UpdatedAt)
+				stateBlocked, reason, next := availabilityBlock(state.Unavailable, state.Quota.Exceeded, retry, state.Quota.NextRecoverAt, now)
 				if !stateBlocked {
 					continue
 				}
@@ -869,7 +870,7 @@ func isAuthBlockedForModel(auth *Auth, model string, now time.Time) (bool, block
 			}
 			return false, blockReasonNone, time.Time{}
 		}
-		return availabilityBlock(auth.Unavailable, auth.Quota.Exceeded, auth.NextRetryAfter, auth.Quota.NextRecoverAt, now)
+		return availabilityBlock(auth.Unavailable, auth.Quota.Exceeded, legacyFailureRetryAfter(auth.Unavailable, auth.Quota, auth.NextRetryAfter, auth.LastError, auth.UpdatedAt), auth.Quota.NextRecoverAt, now)
 	}
 	quotaExceeded := auth.Quota.Exceeded
 	// When model is empty and the credential has individual model states, auth.Quota.Exceeded
@@ -879,7 +880,7 @@ func isAuthBlockedForModel(auth *Auth, model string, now time.Time) (bool, block
 	if len(auth.ModelStates) > 0 && auth.Quota.Reason != "credential_quota" && !auth.Unavailable {
 		quotaExceeded = false
 	}
-	return availabilityBlock(auth.Unavailable, quotaExceeded, auth.NextRetryAfter, auth.Quota.NextRecoverAt, now)
+	return availabilityBlock(auth.Unavailable, quotaExceeded, legacyFailureRetryAfter(auth.Unavailable, auth.Quota, auth.NextRetryAfter, auth.LastError, auth.UpdatedAt), auth.Quota.NextRecoverAt, now)
 }
 
 func availabilityBlock(unavailable, quotaExceeded bool, nextRetryAfter, nextRecoverAt, now time.Time) (bool, blockReason, time.Time) {
