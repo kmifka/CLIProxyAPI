@@ -85,8 +85,8 @@ func (e *CodexExecutor) HttpRequest(ctx context.Context, auth *cliproxyauth.Auth
 		ctx = req.Context()
 	}
 	httpReq := req.WithContext(ctx)
-	if e.homeUltrafastEnabled() && httpReq.Body != nil {
-		body, err := io.ReadAll(httpReq.Body)
+	if e.homeUltrafastEnabled() && httpReq.Body != nil && (auth == nil || strings.TrimSpace(auth.Attributes["api_key"]) == "") {
+		body, err := readHomeUltrafastHTTPBody(httpReq, 128<<20)
 		if err != nil {
 			return nil, err
 		}
