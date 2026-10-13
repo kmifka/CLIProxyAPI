@@ -470,6 +470,9 @@ type FrontendAuthResponse struct {
 const (
 	// SchedulerBuiltinRoundRobin delegates auth selection to the built-in round-robin scheduler.
 	SchedulerBuiltinRoundRobin = "round-robin"
+	// SchedulerBuiltinConfigured delegates to the configured native selector,
+	// retaining its strategy and state within a non-empty EligibleAuthIDs subset.
+	SchedulerBuiltinConfigured = "configured"
 	// SchedulerBuiltinFillFirst delegates auth selection to the built-in fill-first scheduler.
 	SchedulerBuiltinFillFirst = "fill-first"
 )
@@ -531,7 +534,9 @@ type SchedulerAuthCandidate struct {
 
 // SchedulerPickResponse returns a scheduler plugin routing decision.
 type SchedulerPickResponse struct {
-	// EligibleAuthIDs is a non-empty request-local subset for PreferenceOnly.
+	// EligibleAuthIDs is a non-empty request-local subset for PreferenceOnly
+	// or SchedulerBuiltinConfigured delegation. Configured delegation validates
+	// against native candidates and rechecks current holds before native selection.
 	// A handled Reject terminates selection before native affinity, including when
 	// no eligible subset exists; an empty subset alone remains a no-op.
 	EligibleAuthIDs []string

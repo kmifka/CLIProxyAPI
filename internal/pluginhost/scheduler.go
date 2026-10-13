@@ -149,6 +149,17 @@ func normalizeSchedulerResponse(resp pluginapi.SchedulerPickResponse, req plugin
 		}
 		return resp, true, ""
 	}
+	if resp.DelegateBuiltin == pluginapi.SchedulerBuiltinConfigured {
+		if len(resp.EligibleAuthIDs) == 0 {
+			return pluginapi.SchedulerPickResponse{}, false, "empty configured delegation membership"
+		}
+		for _, id := range resp.EligibleAuthIDs {
+			if !schedulerCandidateExists(req.Candidates, id) {
+				return pluginapi.SchedulerPickResponse{}, false, "configured delegation outside native candidates"
+			}
+		}
+		return resp, true, ""
+	}
 	if !validSchedulerBuiltin(resp.DelegateBuiltin) {
 		return pluginapi.SchedulerPickResponse{}, false, "unknown delegate"
 	}

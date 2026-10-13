@@ -968,7 +968,7 @@ func (m *Manager) pickViaBuiltinScheduler(ctx context.Context, strategy schedule
 	return selected, true, nil
 }
 
-func (m *Manager) pickViaPluginScheduler(ctx context.Context, scheduler PluginScheduler, provider string, providers []string, model string, opts cliproxyexecutor.Options, tried map[string]struct{}, candidates []*Auth) (*Auth, bool, error) {
+func (m *Manager) pickViaPluginScheduler(ctx context.Context, scheduler PluginScheduler, provider string, providers []string, model string, opts cliproxyexecutor.Options, tried map[string]struct{}, candidates []*Auth, fallback Selector) (*Auth, bool, error) {
 	if scheduler == nil || len(candidates) == 0 {
 		return nil, false, nil
 	}
@@ -1007,6 +1007,27 @@ func (m *Manager) pickViaPluginScheduler(ctx context.Context, scheduler PluginSc
 		return selected, true, nil
 	}
 
+	if resp.DelegateBuiltin == pluginapi.SchedulerBuiltinConfigured {
+		if len(resp.EligibleAuthIDs) == 0 {
+			return nil, true, &Error{Code: "auth_unavailable", Message: "empty configured delegation membership"}
+		}
+		narrow := make([]*Auth, 0, len(resp.EligibleAuthIDs))
+		for _, id := range resp.EligibleAuthIDs {
+			a := pickSchedulerAuthByID(candidates, id)
+			if a == nil {
+				return nil, true, &Error{Code: "auth_unavailable", Message: "configured delegation outside native candidates"}
+			}
+			if pickSchedulerAuthByID(narrow, id) == nil {
+				narrow = append(narrow, a)
+			}
+		}
+		current := m.currentSelectionCandidates(ctx, provider, model, opts, tried, narrow)
+		if _, weighted := fallback.(*WeightedRoundRobinSelector); weighted {
+			current = positiveWeightAuths(current)
+		}
+		selected, err := fallback.Pick(ctx, provider, selectionArgForSelector(fallback, model), opts, highestPriorityAuths(current))
+		return selected, true, err
+	}
 	strategy, okStrategy := builtinSchedulerStrategy(resp.DelegateBuiltin)
 	if !okStrategy {
 		return nil, false, nil
@@ -1132,7 +1153,7 @@ func (m *Manager) pickWithPluginScheduler(ctx context.Context, selector Selector
 		fallback = affinity.fallback
 	}
 	policy := requestSelector(func(pickCtx context.Context, _ string, _ string, pickOpts cliproxyexecutor.Options, fallbackAuths []*Auth) (*Auth, error) {
-		selected, handled, err := m.pickViaPluginScheduler(pickCtx, scheduler, provider, providers, model, pickOpts, tried, available)
+		selected, handled, err := m.pickViaPluginScheduler(pickCtx, scheduler, provider, providers, model, pickOpts, tried, available, fallback)
 		if err != nil {
 			return nil, err
 		}
