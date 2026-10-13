@@ -973,7 +973,7 @@ func (m *Manager) pickHomeDispatchSelection(ctx context.Context, model string, o
 	// A retained websocket lease has no membership revalidation RPC. Do not
 	// admit an explicit entitlement tier through that legacy shortcut.
 	if homeTierRequiresMembership(opts) && cliproxyexecutor.DownstreamWebsocket(ctx) {
-		return nil, &Error{Code: "auth_unavailable", Message: "tier membership requires fresh Home dispatch", HTTPStatus: http.StatusServiceUnavailable}
+		return nil, &homeWebsocketMembershipError{base: &Error{Code: "auth_unavailable", Message: "tier membership requires fresh Home dispatch", HTTPStatus: http.StatusServiceUnavailable}}
 	}
 	retained, retainedOK, errRetained := m.retainedHomeSessionSelection(ctx, opts, requestedModel, excludedAuthIDs)
 	if errRetained != nil {

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"sort"
@@ -272,6 +273,10 @@ func responsesWebsocketErrorStatus(errMsg *interfaces.ErrorMessage) int {
 func shouldExposeResponsesUpstreamError(errMsg *interfaces.ErrorMessage) bool {
 	if errMsg == nil {
 		return false
+	}
+	var policyDenial interface{ ResponsesWebsocketPolicyDenial() bool }
+	if errors.As(errMsg.Error, &policyDenial) && policyDenial.ResponsesWebsocketPolicyDenial() {
+		return true
 	}
 	if coreauth.IsTerminalAuthError(errMsg.Error) {
 		return true

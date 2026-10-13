@@ -15,6 +15,24 @@ func homeTierRequiresMembership(opts executor.Options) bool {
 	return tier != "" && tier != "auto" && tier != "default" && tier != "standard"
 }
 
+// homeWebsocketMembershipError marks a pre-execution policy denial, not a
+// permanent credential failure. Preserve its cause on the upgraded transport.
+type homeWebsocketMembershipError struct{ base *Error }
+
+func (e *homeWebsocketMembershipError) Error() string                        { return e.base.Error() }
+func (e *homeWebsocketMembershipError) StatusCode() int                      { return e.base.StatusCode() }
+func (e *homeWebsocketMembershipError) ResponsesWebsocketPolicyDenial() bool { return true }
+func (e *homeWebsocketMembershipError) WithAuthError(base *Error) error {
+	return &homeWebsocketMembershipError{base: base}
+}
+func (e *homeWebsocketMembershipError) As(target any) bool {
+	if t, ok := target.(**Error); ok {
+		*t = e.base
+		return true
+	}
+	return false
+}
+
 func trustedHomeDispatchHeaders(ctx context.Context, opts executor.Options) http.Header {
 	out := homeDispatchHeaders(ctx, opts.Headers).Clone()
 	if out == nil {
