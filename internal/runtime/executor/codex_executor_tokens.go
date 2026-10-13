@@ -16,6 +16,11 @@ import (
 )
 
 func (e *CodexExecutor) CountTokens(ctx context.Context, auth *cliproxyauth.Auth, req cliproxyexecutor.Request, opts cliproxyexecutor.Options) (cliproxyexecutor.Response, error) {
+	var guardErr error
+	req, guardErr = e.prepareHomeUltrafast(auth, req, opts)
+	if guardErr != nil {
+		return cliproxyexecutor.Response{}, guardErr
+	}
 	baseModel := thinking.ParseSuffix(req.Model).ModelName
 
 	from := opts.SourceFormat
@@ -37,6 +42,10 @@ func (e *CodexExecutor) CountTokens(ctx context.Context, auth *cliproxyauth.Auth
 	body = helps.SetBoolIfDifferent(body, "stream", false)
 	body = normalizeCodexInstructions(body, helps.IsNativeCodexRequest(req.Payload, opts))
 
+	body, err = e.finalizeHomeUltrafast(auth, req.Model, body)
+	if err != nil {
+		return cliproxyexecutor.Response{}, err
+	}
 	enc, err := tokenizerForCodexModel(baseModel)
 	if err != nil {
 		return cliproxyexecutor.Response{}, fmt.Errorf("codex executor: tokenizer init failed: %w", err)

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -84,6 +85,25 @@ func (e *CodexExecutor) HttpRequest(ctx context.Context, auth *cliproxyauth.Auth
 		ctx = req.Context()
 	}
 	httpReq := req.WithContext(ctx)
+	if e.homeUltrafastEnabled() && httpReq.Body != nil {
+		body, err := io.ReadAll(httpReq.Body)
+		if err != nil {
+			return nil, err
+		}
+		// Restore even on rejection; never send an unverified raw HTTP body.
+		httpReq.Body = io.NopCloser(bytes.NewReader(body))
+		guarded, err := e.prepareHomeUltrafast(auth, cliproxyexecutor.Request{Model: gjson.GetBytes(body, "model").String(), Payload: body}, cliproxyexecutor.Options{})
+		if err != nil {
+			return nil, err
+		}
+		guarded.Payload, err = e.finalizeHomeUltrafast(auth, guarded.Model, guarded.Payload)
+		if err != nil {
+			return nil, err
+		}
+		httpReq.Body = io.NopCloser(bytes.NewReader(guarded.Payload))
+		httpReq.ContentLength = int64(len(guarded.Payload))
+		httpReq.GetBody = func() (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(guarded.Payload)), nil }
+	}
 	if err := e.PrepareRequest(httpReq, auth); err != nil {
 		return nil, err
 	}

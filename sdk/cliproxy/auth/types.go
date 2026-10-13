@@ -48,6 +48,7 @@ func GetRequestInfo(ctx context.Context) *RequestInfo {
 type Auth struct {
 	// Set only by the protected native Home selection decoder; never serialized.
 	homeUltrafastValidated bool
+	homeUltrafastModel     string
 	// ID uniquely identifies the auth record across restarts.
 	ID string `json:"id"`
 	// RegistrationEpoch tracks monotonic registration cycles across unregister/re-register.

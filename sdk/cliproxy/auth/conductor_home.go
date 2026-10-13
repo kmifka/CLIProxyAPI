@@ -1143,6 +1143,7 @@ func (m *Manager) pickHomeDispatchSelection(ctx context.Context, model string, o
 			return nil, err
 		}
 		auth.homeUltrafastValidated = true
+		auth.homeUltrafastModel = requestedModel
 	}
 	if strings.TrimSpace(auth.ID) == "" {
 		// Backward compatibility: older Home instances returned the auth directly.

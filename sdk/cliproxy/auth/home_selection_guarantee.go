@@ -80,3 +80,9 @@ func validateHomeSelectionGuarantee(dispatch *homeAuthDispatchResponse, requeste
 
 // HomeUltrafastValidated is request-local, never decoded from caller metadata.
 func (a *Auth) HomeUltrafastValidated() bool { return a != nil && a.homeUltrafastValidated }
+
+// HomeUltrafastValidatedFor binds admission to the exact selected request model.
+// Neither exported metadata nor a caller-controlled context can mint this state.
+func (a *Auth) HomeUltrafastValidatedFor(model string) bool {
+	return a.HomeUltrafastValidated() && a.homeUltrafastModel == model
+}
