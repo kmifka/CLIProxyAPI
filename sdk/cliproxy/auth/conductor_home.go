@@ -344,15 +344,18 @@ func repeatedHomeAuthError() *Error {
 }
 
 type homeAuthDispatchResponse struct {
-	Model         string                 `json:"model"`
-	Provider      string                 `json:"provider"`
-	AuthIndex     string                 `json:"auth_index"`
-	UserAPIKey    string                 `json:"user_api_key"`
-	RequestRetry  *int                   `json:"request_retry,omitempty"`
-	ForceMapping  bool                   `json:"force_mapping"`
-	OriginalAlias string                 `json:"original_alias"`
-	ModelInfo     *homeDispatchModelInfo `json:"model_info,omitempty"`
-	Auth          Auth                   `json:"auth"`
+	SelectionGuarantee json.RawMessage        `json:"selection_guarantee"`
+	SelectionBinding   json.RawMessage        `json:"selection_binding"`
+	RawAuth            json.RawMessage        `json:"-"`
+	Model              string                 `json:"model"`
+	Provider           string                 `json:"provider"`
+	AuthIndex          string                 `json:"auth_index"`
+	UserAPIKey         string                 `json:"user_api_key"`
+	RequestRetry       *int                   `json:"request_retry,omitempty"`
+	ForceMapping       bool                   `json:"force_mapping"`
+	OriginalAlias      string                 `json:"original_alias"`
+	ModelInfo          *homeDispatchModelInfo `json:"model_info,omitempty"`
+	Auth               Auth                   `json:"auth"`
 }
 
 type homeDispatchModelInfo struct {
@@ -1126,6 +1129,21 @@ func (m *Manager) pickHomeDispatchSelection(ctx context.Context, model string, o
 		return nil, &Error{Code: "invalid_auth", Message: "home returned invalid auth payload", HTTPStatus: http.StatusBadGateway}
 	}
 	auth := dispatch.Auth
+	if dispatchHeaders.Get("X-Home-Service-Tier") == "ultrafast" {
+		var native struct {
+			Auth json.RawMessage `json:"auth"`
+		}
+		if json.Unmarshal(raw, &native) != nil {
+			endScope()
+			return nil, &Error{Code: "invalid_auth", Message: "invalid Home envelope", HTTPStatus: http.StatusServiceUnavailable}
+		}
+		dispatch.RawAuth = native.Auth
+		if err := validateHomeSelectionGuarantee(&dispatch, requestedModel); err != nil {
+			endScope()
+			return nil, err
+		}
+		auth.homeUltrafastValidated = true
+	}
 	if strings.TrimSpace(auth.ID) == "" {
 		// Backward compatibility: older Home instances returned the auth directly.
 		if errUnmarshal := json.Unmarshal(raw, &auth); errUnmarshal != nil {
