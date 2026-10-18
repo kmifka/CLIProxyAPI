@@ -542,6 +542,8 @@ func (h *BaseAPIHandler) GetContextWithCancel(handler interfaces.APIHandler, c *
 		newCtx = logging.WithEndpoint(newCtx, endpoint)
 	}
 	if c != nil && c.Request != nil {
+		newCtx = coreusage.WithHTTPRequestOwnership(newCtx)
+		newCtx = coreusage.WithOriginalRequestID(newCtx, c.Request.Header.Get("X-Platform-Request-ID"))
 		sessionID, parentSessionID := extractSessionIDsFromRequest(c.Request)
 		newCtx = logging.WithClientRequestMetadata(newCtx, logging.ClientRequestMetadata{
 			ClientIP:         requestClientIP(c.Request),

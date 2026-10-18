@@ -4,7 +4,7 @@ import (
 	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/auth"
 	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executor"
 	"github.com/tidwall/gjson"
-	"github.com/tidwall/sjson"
+
 	"net/http"
 	"strings"
 )
@@ -55,5 +55,7 @@ func (e *CodexExecutor) finalizeHomeUltrafast(auth *cliproxyauth.Auth, model str
 	if !auth.HomeUltrafastValidatedFor(model) || auth.Provider != "codex" || gjson.GetBytes(body, "model").String() != model || tier != "ultrafast" {
 		return nil, statusErr{code: http.StatusServiceUnavailable, msg: "Home ultrafast final model/tier guarantee mismatch"}
 	}
-	return sjson.SetBytes(body, "service_tier", "priority")
+	// An admitted entitlement must reach the provider unchanged. A successful
+	// priority response cannot satisfy an explicit ultrafast request.
+	return body, nil
 }

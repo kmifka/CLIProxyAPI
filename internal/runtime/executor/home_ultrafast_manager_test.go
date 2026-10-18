@@ -126,7 +126,10 @@ func TestHomeUltrafastManagerCodexHTTPS(t *testing.T) {
 					}
 					return
 				}
-				wantTier := "priority"
+				wantTier := "ultrafast"
+				if mode == "ordinary" {
+					wantTier = "priority"
+				}
 				if mode == "legacy" || mode == "api-key" {
 					wantTier = "ultrafast"
 				}

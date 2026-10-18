@@ -25,8 +25,10 @@ type Record struct {
 	// RequestID uniquely identifies this specific model execution instance (UUID v4).
 	RequestID string
 	// TraceID identifies the parent inbound HTTP request when available (8-character hex).
-	TraceID  string
-	Provider string
+	TraceID string
+	// OriginalRequestID is the immutable inbound platform correlation ID.
+	OriginalRequestID string
+	Provider          string
 	// BaseURL stores the configured upstream base URL when available.
 	BaseURL string
 	// ExecutorType stores the concrete executor type that handled the request.
@@ -411,6 +413,15 @@ func (m *Manager) Publish(ctx context.Context, record Record) {
 		} else if trID := internallogging.GetRequestID(ctx); trID != "" {
 			record.TraceID = trID
 		}
+	}
+	if record.OriginalRequestID == "" {
+		record.OriginalRequestID = OriginalRequestIDFromContext(ctx)
+	}
+	// Only HTTP-owned contexts cross the metadata-only ownership boundary.
+	// Preserve the exact public SDK caller context otherwise, including typed
+	// values, cancellation and deadlines. Never inspect a pooled Gin object here.
+	if ctx != nil && hasHTTPRequestOwnership(ctx) {
+		ctx = snapshotUsageContext(ctx)
 	}
 	// ensure worker is running even if Start was not called explicitly
 	m.Start(context.Background())
